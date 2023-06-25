@@ -94,9 +94,11 @@ struct NodeMeta {
     mac: Mac,
 }
 
+// Cache must be provided because Cache also needs to be TX-aware
 // TODO: Need a node cache
 
-impl CryptoLog {
+
+impl<L> CryptoLog<L> {
     /// Creates a new `CryptoLog`.
     /// 
     /// A newly-created instance won't occupy any space on the `block_log`
@@ -113,18 +115,18 @@ impl CryptoLog {
         todo!()
     }
 
-    /// Returns the root key.
+    /// Gets the root key.
     pub fn key(&self) -> &Key {
         &self.key
     }
 
-    /// Returns the metadata of the root block.
-    pub fn root_meta(&self) -> Option<&RootMeta> {
+    /// Gets the metadata of the root block.
+    pub fn root_meta(&self) -> Option<&RootMhtMeta> {
         self.root_meta.as_ref()
     }
 
-    /// Returns the number of data blocks.
-    pub fn num_blocks(&self) -> usize {
+    /// Gets the number of data blocks.
+    pub fn nblocks(&self) -> usize {
         todo!()
     }
 
@@ -134,7 +136,7 @@ impl CryptoLog {
     }
 
     /// Appends one or multiple data blocks at the end.
-    pub fn append(&mut self, buf: &impl BlockBuf) -> Result<()> {
+    pub fn append(&self, buf: &impl BlockBuf) -> Result<()> {
         todo!()
     }
 
@@ -143,7 +145,13 @@ impl CryptoLog {
     /// Each successful flush triggers writing a new version of the root MHT
     /// node to the underlying block log. The metadata of the latest root MHT
     /// can be obtained via the `root_meta` method.
-    pub fn flush(&mut self) -> Result<()> {
+    pub fn flush(&self) -> Result<()> {
         todo!()
     }
 }
+
+// CryptoLog can derive CryptoLogSnapshot, which is a read-only snapshot
+// of the CryptoLog.
+// A derived CryptoLogSnapshot shared the same cache with its parent.
+// 
+// But CryptoLog does not support rollback. How to do it?

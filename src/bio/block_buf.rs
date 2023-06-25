@@ -8,7 +8,7 @@ pub trait BlockBuf {
     
     fn as_slice_mut(&mut self) -> &mut [u8];
 
-    fn num_blocks(&self) -> usize;
+    fn nblocks(&self) -> usize;
 }
 
 pub struct BlockBuf<T>(T);
@@ -25,7 +25,7 @@ where
         self.0.deref_mut()
     }
 
-    fn num_blocks(&self) -> usize {
+    fn nblocks(&self) -> usize {
         self.as_slice() / BLOCK_SIZE
     }
 }

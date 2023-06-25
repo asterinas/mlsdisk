@@ -129,9 +129,9 @@ impl<L: BlockLog> CrytpoChain<L> {
         self.block_range
     }
 
-    /// Returns the number of blocks that are accessible through the `CryptoChain`.
-    pub fn num_blocks(&self) -> usize {
-        self.block_range.len()
+    /// Returns the underlying block log.
+    pub fn inner_log(&self) -> &L {
+        &self.block_log
     }
 
     /// Returns the encryption key of the `CryptoChain`.

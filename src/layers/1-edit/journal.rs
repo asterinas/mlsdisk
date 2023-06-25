@@ -4,114 +4,166 @@ use postcard::{from_bytes};
 
 use crate::bio::{BlockLog, BlockSet};
 use crate::layers::crypto::{CryptoChain, CryptoBlob};
-use super::Edit;
+use super::{Edit, EditGroup};
 
-/// The journal of a series of edits to an object.
+/// The journal of a series of edits to a persistent state.
 /// 
-/// By tracking all the edits made to an object, `EditJournal` maintains
-/// the latest state of an object that may be updated with incremental changes
-/// and in high frequency. Behind the scene, `EditJournal` leverages 
-/// a `CryptoChain` to store the edit sequence securely.
+/// `EditJournal` is designed to cater the needs of a usage scenario
+/// where a persistent state is updated with incremental changes and in high
+/// frequency. Apparently, writing the latest value of the
+/// state to disk upon every update would result in a poor performance.
+/// So instead `EditJournal` keeps a journal of these incremental updates,
+/// which are called _edits_. Collectively, these edits can represent the latest
+/// value of the state. Edits are persisted in batch, thus the write performance
+/// is superior.
+/// Behind the scene, `EditJournal` leverages a `CryptoChain` to store the edit 
+/// journal securely.
+/// 
+/// # Compaction
 /// 
 /// As the total number of edits amounts over time, so does the total size of 
 /// the storage space consumed by the edit journal. To keep the storage
-/// consumption at bay, object edits are merged into one object snapshot periodically.
+/// consumption at bay, accumulated edits are merged into one snapshot periodically,
 /// This process is called compaction.
 /// The snapshot is stored in a location independent from the journal,
 /// using `CryptoBlob` for security. The MAC of the snapshot is stored in the
 /// journal. Each `EditJournal` keeps two copies of the snapshots so that even
 /// one of them is corrupted due to unexpected crashes, the other is still valid.
-pub struct EditJournal<E: Edit, L, S, P> {
-    journal_chain: CryptoChain<L>,
-    snapshot_blobs: [CryptoBlob<S>; 2],
+/// 
+/// # Atomicity
+/// 
+/// Edits are added to an edit journal individually with the `add` method but
+/// are committed to the journal atomically via the `commit` method. This is
+/// done by buffering newly-added edits into an edit group, which is called
+/// the _current edit group_. Upon commit, the current edit group is persisted
+/// to disk as a whole. It is guaranteed that the recovery process shall never
+/// recover a partial edit group.
+pub struct EditJournal<S /* State */, D /* BlockSet */, P /* Policy */> {
+    state: S,
+    journal_chain: CryptoChain<BlockRing<D>>,
+    snapshot_blobs: [CryptoBlob<D>; 2],
     compaction_policy: P,
-    object: E::Object,
+    curr_edit_group: EditGroup<S>,
     write_buf: WriteBuf,
 }
 
-impl<E, L, S, P> EditJournal<E, L, S, P> 
+/// The metadata of an edit journal.
+/// 
+/// The metadata is mainly useful when recovering an edit journal after a reboot.
+pub struct EditJournalMeta {
+    /// The number of blocks reserved for storing a snapshot `CryptoBlob`.
+    pub snapshot_area_nblocks: usize,
+    /// The key of a snapshot `CryptoBlob`.
+    pub snapshot_area_keys: [Key; 2],
+    /// The number of blocks reserved for storing the journal `CryptoChain`.
+    pub journal_area_nblocks: usize,
+    /// The key of the `CryptoChain`.
+    pub journal_area_key: Key,
+}
+
+impl EditJournalMeta {
+    /// Returns the total number of blocks occupied by the edit journal.
+    pub fn total_nblocks(&self) -> usize {
+        self.snapshot_area_nblocks * 2 + self.journal_area_nblocks
+    }
+}
+
+impl<S, D, P> EditJournal<S, D, P>
 where
-    E: Edit,
-    L: BlockLog,
-    S: BlockSet,
-    P: CompactPolicy<E>,
+    D: BlockSet,
+    P: CompactionPolicy,
 {
-    /// Format the given `block_log` and `block_sets` as the storage for a
-    /// new `EditJournal`, returning the crypo-protected versions of the 
-    /// storage.
-    /// 
-    /// After formatting, the crypto-protected versions of storage will be 
-    /// returned. Later, they can be feed to the `recover` method
-    /// to open the `EditJournal`. The initial state of the object represented
-    /// by the journal is as specified by `init_object`.
+    /// Format the disk for storing an edit journal with the specified
+    /// configurations, e.g., the initial state.
     pub fn format(
-        init_object: E::Object,
-        block_log: L,
-        block_sets: [S; 2]
-    ) -> Result<(CryptoChain<L>, CryptoBlob<S>)> {
+        disk: D,
+        init_state: S,
+        state_max_nbytes: usize,
+        compaction_policy: P,
+    ) -> Result<EditJournal> {
         todo!()
     }
 
-    /// Recover the state of an `EditJournal` given its crypo-protected storage
-    /// regions.
+    /// Recover an existing edit journal from the disk with the given
+    /// configurations.
     /// 
-    /// # Panics
-    /// 
-    /// The user must make sure that the given storage indeed stores an 
-    /// `EditJournal` for edit type `E`. Otherwise, attempts to deserilize edits
-    /// will fail, causing panics.
+    /// If the recovery process succeeds, the edit journal is returned
+    /// and the state represented by the edit journal can be obtained
+    /// via the `state` method. 
     pub fn recover(
-        journal_chain: CryptoChain<L>,
-        version_blobs: [CryptoBlob<S>; 2],
-        compaction_policy: CompactPolicy,
+        disk: D,
+        meta: &EditJournalMeta,
+        compaction: CompactionPolicy
     ) -> Result<Self> {
         todo!()
     }
 
-    /// Returns the object represented by the journal.
-    pub fn object(&self) -> &E::Object {
-        &self.object
+    /// Returns the state represented by the journal.
+    pub fn state(&self) -> &S {
+        &self.state
     }
 
-    /// Apply an edit to the object represented by the edit journal and write
-    /// a journal record to persist the edit.
-    pub fn apply(&mut self, edit: &E) -> Result<()> {
-        edit.apply_to(&mut self.object)?;
-
-        self.write(edit)
-            .expect("edit has been applied the object; no way to rollback");
-
-        self.compaction_policy.accmulate_edit(edit);
-
-        Ok(())
+    /// Returns the metadata of the edit journal.
+    pub fn meta(&self) -> EditJournalMeta {
+        EditJournalMeta {
+            snapshot_area_nblocks: self.snapshot_blobs[0].nblocks(),
+            snapshot_area_keys: [
+                self.snapshot_blobs[0].key().to_owned(),
+                self.snapshot_blobs[1].key().to_owned(),
+            ],
+            journal_area_nblocks: self.journal_chain.inner_log().nblocks(),
+            journal_area_key: self.journal_chain.key().to_ownwed(),
+        }
     }
 
-    fn write(&mut self, edit: &E) -> Result<()> {
-        let is_first_try_success = self.write_buf.write(edit).is_some();
-        if is_first_try_success {
-            return Ok(());
+    /// Add an edit to the current edit group.
+    pub fn add<E: Edit<S>>(&mut self, edit: &E) {
+        self.curr_edit_group.add(edit);
+    }
+
+    /// Commit the current edit group.
+    pub fn commit(&mut self) {
+        if self.curr_edit_group.is_empty() {
+            return;
         }
 
+        self.write(&self.curr_edit_group);
+        self.object.apply(&self.curr_edit_group);
+        self.compaction_policy.on_commit_edits(&self.curr_edit_group);
+
+        self.curr_edit_group.clear();
+    }
+
+    fn write(&mut self, edit_group: &EditGroup<S>) {
+        let is_first_try_success = self.write_buf.write(edit_group).is_some();
+        if is_first_try_success {
+            return;
+        }
+
+        // TODO: sync disk first to ensure data are persisted before 
+        // journal records.
+
         let write_data = self.write_buf.as_slice();
-        self.journal_chain.append(write_data)?;
+        self.journal_chain
+            .append(write_data)
+            // TODO: how to handle I/O error in journaling?
+            .expect("we cannot handle I/O error in journaling gracefully");
         self.write_buf.clear();
 
-        let is_second_try_success = self.write_buf.write(edit).is_some();
+        if self.compaction_policy.should_compact() {
+            self.compact()?;
+            self.compaction_policy.done_compact();
+        }
+
+        let is_second_try_success = self.write_buf.write(edit_group).is_some();
         if is_second_try_success {
             panic!("the write buffer must have enough free space");
         }
-        Ok(())
     }
 
-    /// Ensure all edits are persisted.
-    pub fn flush(&mut self) -> Result<()> {
-        if self.compaction_policy.should_compact() {
-            self.compact()?;
-            self.compaction_policy.reset();
-        }
-
-        self.journal_chain.flush()?;
-        Ok(())
+    /// Abort the current edit group by removing all its contained edits.
+    pub fn abort(&mut self) {
+        self.curr_edit_group.clear();
     }
 
     fn compact(&mut self) -> Result<()> {
@@ -121,34 +173,34 @@ where
 
 /// A journal record in an edit journal.
 #[derive(Serialize, Deserialize)]
-enum Record<E> {
-    /// A record refers to an edit version of a specific MAC.
+enum Record<S> {
+    /// A record refers to a state snapshot of a specific MAC.
     Version(Mac),
-    /// A record that contains an edit.
-    Edit(E),
+    /// A record that contains an edit group.
+    Edit(EditGroup<S>),
 }
 
-/// A buffer for writing records into an edit journal.
+/// A buffer for writing journal records into an edit journal.
 /// 
 /// The capacity of `WriteBuf` is equal to the (available) block size of 
-/// `CryptoChain`. Records that are written to an edit journal will first
-/// be inserted into the `WriteBuf`. When the `WriteBuf` is (near) full, 
+/// `CryptoChain`. Records that are written to an edit journal are first
+/// be inserted into the `WriteBuf`. When the `WriteBuf` is full or almost full, 
 /// the buffer as a whole will be written to the underlying `CryptoChain`.
-struct WriteBuf<E> {
+struct WriteBuf<S> {
     buf: Box<[u8]>,
     avail_begin: usize,
     avail_end: usize,
-    phantom: PhantomData<E>,
+    phantom: PhantomData<S>,
 }
 
-impl<E: Edit> WriteBuf<E> {
+impl<S> WriteBuf<S> {
     /// Creates a new instance.
     pub fn new() -> Self {
         todo!()
     }
 
     /// Writes a record into the buffer.
-    pub fn write(&mut self, record: &Record<E>) -> Option<()> {
+    pub fn write(&mut self, record: &Record<S>) -> Option<()> {
         // Write the record at the beginning of the avail buffer
         let serial_record_len = match postcard::to_slice(record, self.avail_buf()) {
             Ok(serial_record) => serial_record.len(),
@@ -205,13 +257,13 @@ impl<E: Edit> WriteBuf<E> {
 /// A byte slice containing serialized edit records. 
 /// 
 /// The slice allows deserializing and iterates the contained edit records.
-struct RecordSlice<'a, E> {
+struct RecordSlice<'a, S> {
     buf: &'a [u8],
-    phantom: PhantomData<E>,
+    phantom: PhantomData<S>,
     any_error: bool,
 }
 
-impl<'a, E> RecordSlice<'a, E> {
+impl<'a, S> RecordSlice<'a, S> {
     /// Create a new slice of edit records in serialized form.
     pub fn new(buf: &'a [u8]) -> Self {
         Self {
@@ -227,10 +279,10 @@ impl<'a, E> RecordSlice<'a, E> {
     }
 }
 
-impl<'a, E: Edit> Iterator for RecordSlice<'a, E> {
-    type Item = Record; 
+impl<'a, S> Iterator for RecordSlice<'a, S> {
+    type Item = Record<S>; 
 
-    fn next(&mut self) -> Option<Record<E>> {
+    fn next(&mut self) -> Option<Record<S>> {
         let record_len = {
             if self.buf.len() <= U16_LEN {
                 return None;
@@ -267,16 +319,27 @@ const U16_LEN: usize = mem::size_of::<u16>();
 
 /// A compaction policy, which decides when is the good timing for compacting
 /// the edits in an edit journal.
-pub trait CompactPolicy<E: Edit> {
-    /// Accmulate one more edit.
+pub trait CompactPolicy<S> {
+    /// Called when an edit group is committed.
     /// 
-    /// As more edits are accmulated, the compact policy is more likely to
-    /// decide that it is now a good time to compact.
-    fn accumulate(&mut self, edit: &E);
+    /// As more edits are accmulated, the compaction policy is more likely to
+    /// decide that now is the time to compact.
+    fn on_commit_edits(&mut self, edits: &EditGroup<S>);
 
     /// Returns whether now is a good timing for compaction.
     fn should_compact(&self) -> bool;
 
     /// Reset the state, as if no edits have ever been added.
-    fn reset(&mut self);
+    fn done_compact(&mut self);
+}
+
+/// A never-do-compaction policy. Mostly useful for testing.
+pub struct NeverCompactPolicy;
+
+impl<S> CompactPolicy<S> for NeverCompactPolicy {
+    fn on_commit_edits(&mut self, _edits: &EditGroup<S>) {}
+
+    fn should_compact(&self) -> bool { false }
+
+    fn done_compact(&mut self) {}
 }

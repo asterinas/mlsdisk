@@ -46,6 +46,9 @@ pub struct CryptoBlob<B> {
 }
 
 impl<B: BlockSet> CryptoBlob<B> {
+    /// The size of the header of a crypto blob in bytes.
+    pub const HEADER_NBYTES: usize = 32;
+
     /// Opens an existing `CryptoBlob`.
     /// 
     /// The capacity of this `CryptoBlob` object is determined by the size 
@@ -113,6 +116,11 @@ impl<B: BlockSet> CryptoBlob<B> {
 
     /// Returns the capacity of this `CryptoBlob` in bytes.
     pub fn capacity(&self) -> usize {
-        self.block_set.num_blocks() * BLOCK_SIZE
+        self.block_set.nblocks() * BLOCK_SIZE - Self::HEADER_NBYTES
+    }
+
+    /// Returns the number of blocks occupied by the underlying `BlockSet`.
+    pub fn nblocks(&self) -> usize {
+        self.block_set.nblocks()
     }
 }

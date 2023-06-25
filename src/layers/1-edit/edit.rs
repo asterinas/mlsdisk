@@ -1,85 +1,55 @@
-use core::ops::{Deref, DerefMut};
-
+use core::iter::Iterator;
 use serde::{Serialize, Deserialize};
 
-/// An edit to an object.
-pub trait Edit: Serialize + Deserialize {
-    type Object: Object;
-    type Error;
-
-    /// Apply this edit to an object.
-    fn apply_to(&self, object: &mut Self::Object) -> Result<(), Self::Error>;
+/// An edit of `Edit<S>` is an incremental change to a state of `S`.
+pub trait Edit<S>: Serialize + for<'de> Deserialize<'de> {
+    /// Apply this edit to a state.
+    fn apply_to(&self, state: &mut S);
 }
 
-/// An editable object.
-pub trait Object: Serialize + Deserialize {
+/// A group of edits to a state.
+pub struct EditGroup<S: Sized> {
+    edits: Vec<Box<dyn Edit<S>>>,
 }
 
-/// A group of edits.
-/// 
-/// A group of edits is also viewed an edit. This could be convenient when
-/// a group of edits should be treated as an atomic edit.
-pub struct EditGroup<E> {
-    edits: Vec<E>,
-}
-
-impl<E: Edit> EditGroup<E> {
-    /// Creates a new instance.
+impl<S: Sized> EditGroup<S> {
+    /// Creates an empty edit group.
     pub fn new() -> Self {
-        Self { edits: Vec::new(), }
+        Self {
+            edits: Vec::new(),
+        }
     }
 
     /// Adds an edit to the group.
-    pub fn add(&mut self, edit: E) {
-        self.edits.push_back(edit)
+    pub fn push<E: Edit<S> + 'static>(&mut self, edit: E) {
+        self.edits.push(Box::new(edit) as Box<dyn Edit<S>>);
     }
 
-    /// Returns the number of edits in the group.
-    pub fn len(&self) -> usize {
-        self.edits.len()
+    /// Returns an iterator to the contained edits.
+    pub fn iter(&self) -> impl Iterator<Item = &dyn Edit<S>> {
+        self.edits.iter().map(|boxed| &**boxed)
     }
 
-    /// Clears the group, removing all edits.
+    /// Clears the edit group by removing all contained edits.
     pub fn clear(&mut self) {
         self.edits.clear()
     }
 
-    /// Returns a slice of the edits in the group.
-    pub fn as_slice(&self) -> &[E] {
-        self.edits.as_slice()
+    /// Returns whether the edit group contains no edits.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
-    
-    /// Returns a mutable slice of the edits in the group.
-    pub fn as_slice_mut(&mut self) -> &mut [E] {
-        self.edits.as_slice_mut()
-    }
-}
 
-impl<E> Deref for EditGroup<E> {
-    type Target = [E];
-
-    #[inline]
-    fn deref(&self) -> &[E] {
-        self.as_slice()
+    /// Returns the length of the edit group.
+    pub fn len(&self) -> usize {
+        self.edits.len()
     }
 }
 
-impl<E> DerefMut for EditGroup<E> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut [E] {
-        self.as_slice_mut()
-    }
-}
-
-impl<E: Edit> Edit for EditGroup<E> {
-    type Object = <E as Edit>::Object;
-    type Error = <E as Edit>::Error;
-
-    fn apply_to(&self, object: &mut Self::Object) -> Result<(), Self::Error> {
+impl<S: Sized> Edit<S> for EditGroup<S> {
+    fn apply_to(&self, state: &mut S) {
         for edit in &self.edits {
-            // TODO: what if one edit fails to apply? need to rollback applied
-            // edits?
-            edit.apply_to(object)?;
+            edit.apply_to(state);
         }
     }
 }
