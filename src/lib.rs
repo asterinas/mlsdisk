@@ -2,6 +2,5 @@
 
 extern crate alloc;
 
-mod layers;
-mod bio; 
+pub mod layers;
 pub mod util;
