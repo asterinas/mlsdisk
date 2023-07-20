@@ -95,7 +95,7 @@ struct NodeMeta {
 }
 
 // Cache must be provided because Cache also needs to be TX-aware
-// TODO: Need a node cache
+// TODO: Need a node cache (only cache mht nodes)
 
 
 impl<L> CryptoLog<L> {

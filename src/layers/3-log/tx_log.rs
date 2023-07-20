@@ -207,7 +207,7 @@ impl TxLogStoreEdit {
         Ok(())
     }
 
-    pub fn iter_deleted_logs(&self) -> impl Iterator<Item = LogId> {
+    pub fn iter_deleted_logs(&self) -> impl Iterator<Item = TxLogId> {
         self.edit_table.iter
     }
 
