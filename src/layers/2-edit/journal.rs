@@ -128,7 +128,7 @@ where
         }
 
         self.write(&self.curr_edit_group);
-        self.object.apply(&self.curr_edit_group);
+        self.state.apply(&self.curr_edit_group);
         self.compaction_policy.on_commit_edits(&self.curr_edit_group);
 
         self.curr_edit_group.clear();
