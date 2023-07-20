@@ -127,13 +127,15 @@ struct RawLogHead {
 }
 
 struct PersistentState {
+    chunk_logs: BTreeMap<RawLogId, RawLogState>, 
+    max_log_id: Option<u64>,
 }
 
-struct PersistentChange {
-    change_table: BTreeMap<LogId, RawLogChange>,
+struct PersistentEdit {
+    change_table: BTreeMap<LogId, RawLogEdit>,
 }
 
-enum RawLogChange {
+enum RawLogEdit {
     Create(RawLogCreate),
     Append(RawLogAppend),
     Delete,
@@ -206,11 +208,11 @@ impl State {
         log_table.get(&log_id).map(|entry| entry.clone())
     }
 
-    pub fn commit(&mut self, change: &mut PersistentChange, chunk_alloc: &ChunkAlloc) {
+    pub fn commit(&mut self, change: &mut PersistentEdit, chunk_alloc: &ChunkAlloc) {
         let mut all_changes = change.change_table.drain_filter(|| true);
         for (log_id, change) in all_changes {
             match change {
-                RawLogChange::Create(create) => {
+                RawLogEdit::Create(create) => {
                     let RawLogCreate { tail, is_deleted } = create;
                     if is_deleted {
                         chunk_alloc.dealloc_batch(tail.chunks.iter());
@@ -220,7 +222,7 @@ impl State {
                     self.create_log(log_id);
                     self.append_log(log_id, &mut tail);
                 }
-                RawLogChange::Append(append) => {
+                RawLogEdit::Append(append) => {
                     let RawLogAppend { tail, is_deleted } = append;
 
                     // Even if a log is to be deleted, we will still commit
@@ -228,7 +230,7 @@ impl State {
 
                     self.append_log(log_id, &mut tail);
                 }
-                RawLogChange::Delete => {
+                RawLogEdit::Delete => {
                     self.delete_log(log_id);
                 }
             }
@@ -258,13 +260,13 @@ impl State {
     }
 }
 /*
-struct PersistentChange {
-    change_table: BTreeMap<LogId, RawLogChange>,
+struct PersistentEdit {
+    change_table: BTreeMap<LogId, RawLogEdit>,
 }
  */
-impl PersistentChange {
+impl PersistentEdit {
     pub fn create_log(&mut self, new_log_id: RawLogId) {
-        let new_log_chanage = RawLogChange::Create(RawLogCreate::new());
+        let new_log_chanage = RawLogEdit::Create(RawLogCreate::new());
         let existing_change = self.change_table.insert(new_log_id, new_log_change);
         debug_assert!(existing_change.is_none());
     }
@@ -280,7 +282,7 @@ impl PersistentChange {
                 // if change == delete, panic
             }
         }
-        let new_log_chanage = RawLogChange::Create(RawLogCreate::new());
+        let new_log_chanage = RawLogEdit::Create(RawLogCreate::new());
         self.changes.insert(new_log_id, new_log_change);
     }
 
@@ -328,7 +330,7 @@ impl<S> RawLogStoreInner<S> {
 
         let tx_id = current_tx.id();
         let new_log_id = state.alloc_log_id();
-        current_tx.data_mut_with(|change: &mut PersistentChange| {
+        current_tx.data_mut_with(|change: &mut PersistentEdit| {
             change.create_log(new_log_id);
         });
 
@@ -337,7 +339,7 @@ impl<S> RawLogStoreInner<S> {
             tx_id,
             log_store: self.weak_self.upgrade(),
             log_entry: None,
-            can_write: false,
+            can_write: false, // can_append
         })
     }
 
@@ -354,7 +356,7 @@ impl<S> RawLogStoreInner<S> {
             }
         } else {
             // The log must has been created by this Tx
-            let not_created = current_tx.data_mut_with(|change: &mut PersistentChange| {
+            let not_created = current_tx.data_mut_with(|change: &mut PersistentEdit| {
                 change.is_log_created(log_id)
             });
             if !not_created {
@@ -364,7 +366,7 @@ impl<S> RawLogStoreInner<S> {
 
         // If the log is open in the write mode, change must be prepared
         if can_write {
-            current_tx.data_mut_with(|change: &mut PersistentChange| {
+            current_tx.data_mut_with(|change: &mut PersistentEdit| {
                 change.open_log(log_id, &*log_entry.lock());
             });
         }
@@ -381,13 +383,13 @@ impl<S> RawLogStoreInner<S> {
 
     pub fn delete_log(&self, log_id: RawLogId) -> Result<()> {
         let mut current_tx = self.tx_provider.current();
-        current_tx.data_mut_with(|change: &mut PersistentChange| {
+        current_tx.data_mut_with(|change: &mut PersistentEdit| {
             change.delete_log(log_id);
         })
     }
 }
 
-struct RawLog<S> {
+pub struct RawLog<S> {
     log_id: RawLogId,
     tx_id: TxId,
     log_store: Arc<RawLogStoreInner<S>>,
@@ -529,7 +531,7 @@ struct PersistentState {
     max_log_id: Option<u64>,
 }
 
-struct PersistentChange {
+struct PersistentEdit {
     changed_logs: BTreeMap<ChunkLogId, ChunkLogState>, 
     max_log_id: Option<u64>,
 }
@@ -594,11 +596,11 @@ impl Drop for RawLog {
 
 
 impl PersistentState {
-    pub fn commit(&mut self, change: &mut PersistentChange) {
+    pub fn commit(&mut self, change: &mut PersistentEdit) {
 
     }
 
-    pub fn uncommit(&mut self, change: &mut PersistentChange) {
+    pub fn uncommit(&mut self, change: &mut PersistentEdit) {
 
     }
 }
