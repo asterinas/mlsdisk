@@ -559,6 +559,8 @@ impl<K, V, D> AppendTx<K, V, D> {
         });
         if res.is_err() {
             wal_tx.abort();
+            self.wal_tx_and_log.lock().take();
+            self.buf.lock().clear();
             return res;
         }
 

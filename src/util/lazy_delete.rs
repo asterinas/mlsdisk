@@ -1,5 +1,5 @@
-use core::ops::{Deref, DerefMut};
 use core::fmt;
+use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 /// An object that may be deleted lazily.
@@ -8,30 +8,30 @@ use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
 /// This technique allows an object to remain usable even after a decision
 /// to delete the object has been made. Of course. After the "real" deletion
 /// is carried out, the object will no longer be usable.
-/// 
+///
 /// A classic example is file deletion in UNIX file systems.
-/// 
+///
 /// ```ignore
 /// int fd = open("path/to/my_file", O_RDONLY);
 /// unlink("path/to/my_file");
 /// // fd is still valid after unlink
 /// ```
-/// 
+///
 /// `LazyDelete<T>` enables lazy deletion of any object of `T`.
 /// Here is a simple example.
-/// 
+///
 /// ```
 /// use sworndisk_v2::lazy_delete::*;
-/// 
+///
 /// let lazy_delete_u32 = LazyDelete::new(123_u32, |obj| {
 ///     println!("the real deletion happens in this closure");
 /// });
-/// 
+///
 /// // The object is still usable after it is deleted (lazily)
 /// LazyDelete::delete(&lazy_delete_u32);
 /// assert!(*lazy_delete_u32 == 123);
 ///
-/// // The deletion operation will be carried out when it is dropped 
+/// // The deletion operation will be carried out when it is dropped
 /// drop(lazy_delete_u32);
 /// ```
 pub struct LazyDelete<T> {
@@ -43,15 +43,15 @@ pub struct LazyDelete<T> {
 impl<T: fmt::Debug> fmt::Debug for LazyDelete<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LazyDelete")
-         .field("obj", &self.obj)
-         .field("is_deleted", &Self::is_deleted(self))
-         .finish()
+            .field("obj", &self.obj)
+            .field("is_deleted", &Self::is_deleted(self))
+            .finish()
     }
 }
 
 impl<T> LazyDelete<T> {
     /// Creates a new instance of `LazyDelete`.
-    /// 
+    ///
     /// The `delete_fn` will be called only if this instance of `LazyDelete` is
     /// marked deleted by the `delete` method and only when this instance
     /// of `LazyDelete` is dropped.

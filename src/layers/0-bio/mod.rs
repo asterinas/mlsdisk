@@ -2,14 +2,16 @@ use static_assertions::assert_eq_size;
 
 mod block_buf;
 mod block_log;
-mod block_set;
 mod block_ring;
+mod block_set;
 
-pub use self::block_log::BlockLog;
-pub use self::block_set::BlockSet;
-pub use self::block_ring::BlockRing;
 pub use self::block_buf::BlockBuf;
+pub use self::block_log::BlockLog;
+pub use self::block_ring::BlockRing;
+pub use self::block_set::BlockSet;
 
 pub type BlockId = usize;
+pub const BLOCK_SIZE: usize = 0x1000;
+
 // This definition of BlockId assumes the target architecture is 64-bit
-assert_eq_size!(usize, u64); 
+assert_eq_size!(usize, u64);
