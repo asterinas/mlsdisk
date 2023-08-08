@@ -1,12 +1,13 @@
-use core::ops::Range;
+use super::BlockBuf;
+use crate::prelude::*;
+
+use inherit_methods_macro::inherit_methods;
 use pod::Pod;
 
-use super::BlockId;
-
 /// A fixed set of data blocks that can support random reads and writes.
-/// 
+///
 /// # Thread safety
-/// 
+///
 /// `BlockSet` is a data structure of interior mutability.
 /// It is ok to perform I/O on a `BlockSet` concurrently in multiple threads.
 /// `BlockSet` promises the atomicity of reading and writing individual blocks.
@@ -27,9 +28,6 @@ pub trait BlockSet: Sync + Send {
         todo!("provide the default impl using write")
     }
 
-    /// Get a subset of the blocks in the block set.
-    fn subset(&self, range: Range<BlockId>) -> Result<Self>; 
-
     /// Ensure that blocks are persisted to the disk.
     fn flush(&self) -> Result<()>;
 
@@ -37,32 +35,21 @@ pub trait BlockSet: Sync + Send {
     fn nblocks(&self) -> usize;
 }
 
-#[inherit_methods(from = "(**self)", inline = true)]
-impl<T: BlockSet> &T for BlockSet {
-    fn read(&self, pos: BlockId, buf: &mut impl BlockBuf) -> Result<()>;
-    fn read_slice(&self, offset: usize, buf: &mut [u8]) -> Result<()>;
-    fn write(&self, pos: BlockId, buf: &impl BlockBuf) -> Result<()>;
-    fn write_slice(&self, offset: usize, buf: &[u8]) -> Result<()>;
-    fn flush(&self) -> Result<()>;
-    fn nblocks(&self) -> usize;
+macro_rules! impl_blockset_pointer {
+    ($typ:ty,$from:tt) => {
+        #[inherit_methods(from = $from)]
+        impl<T: BlockSet> BlockSet for $typ {
+            fn read(&self, pos: BlockId, buf: &mut impl BlockBuf) -> Result<()>;
+            fn read_slice(&self, offset: usize, buf: &mut [u8]) -> Result<()>;
+            fn write(&self, pos: BlockId, buf: &impl BlockBuf) -> Result<()>;
+            fn write_slice(&self, offset: usize, buf: &[u8]) -> Result<()>;
+            fn flush(&self) -> Result<()>;
+            fn nblocks(&self) -> usize;
+        }
+    };
 }
 
-#[inherit_methods(from = "(**self)", inline = true)]
-impl<T: BlockSet> Box<T> for BlockSet {
-    fn read(&self, pos: BlockId, buf: &mut impl BlockBuf) -> Result<()>;
-    fn read_slice(&self, offset: usize, buf: &mut [u8]) -> Result<()>;
-    fn write(&self, pos: BlockId, buf: &impl BlockBuf) -> Result<()>;
-    fn write_slice(&self, offset: usize, buf: &[u8]) -> Result<()>;
-    fn flush(&self) -> Result<()>;
-    fn nblocks(&self) -> usize;
-}
-
-#[inherit_methods(from = "(**self)", inline = true)]
-impl<T: BlockSet> Arc<T> for BlockSet {
-    fn read(&self, pos: BlockId, buf: &mut impl BlockBuf) -> Result<()>;
-    fn read_slice(&self, offset: usize, buf: &mut [u8]) -> Result<()>;
-    fn write(&self, pos: BlockId, buf: &impl BlockBuf) -> Result<()>;
-    fn write_slice(&self, offset: usize, buf: &[u8]) -> Result<()>;
-    fn flush(&self) -> Result<()>;
-    fn nblocks(&self) -> usize;
-}
+impl_blockset_pointer!(&T, "(**self)");
+// impl_blockset_pointer!(&mut T, "(**self)");
+impl_blockset_pointer!(Box<T>, "(**self)");
+impl_blockset_pointer!(Arc<T>, "(**self)");

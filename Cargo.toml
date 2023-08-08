@@ -6,9 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anymap = { version = "0.12.1" }
-bitvec = { version = "1.0.1", default-features = false, features = ["atomic", "alloc"] }
-static_assertions = "1.1.0"
-serde = { version = "1.0", features = ["derive"] }
-typetag = "0.2"
+inherit-methods-macro = {git = "https://github.com/jinzhao-dev/inherit-methods-macro", rev = "98f7e3e"}
+pod = {git = "https://github.com/jinzhao-dev/pod", rev = "7fa2ed2"}
+
+anymap = {version = "0.12.1"}
+bitvec = {version = "1.0.1", default-features = false, features = ["atomic", "alloc"]}
+serde = {version = "1.0", features = ["derive"]}
 spin = "0.9.8"
+static_assertions = "1.1.0"
+typetag = "0.2"
