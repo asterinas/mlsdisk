@@ -1,17 +1,19 @@
 //! Transaction management.
-//! 
+//!
 //! Transaction management APIs serve two sides:
-//! 
+//!
 //! * The user side of TXs uses `Tx` to use, commit, or abort TXs.
 //! * The implementation side of TXs uses `TxProvider` to get notified
-//! when TXs are created, committed, or aborted by register callbacks. 
-
+//! when TXs are created, committed, or aborted by register callbacks.
 mod current;
 
-use alloc::sync::{Arc, Weak, AtomicU64, Ordering::{Relaxed}};
-use anymap::{AnyMap, any::Any};
+pub use self::current::CurrentTx;
 
-pub use self::current::{CurrentTx};
+use crate::prelude::*;
+use alloc::sync::{Arc, Weak};
+use anymap::{any::Any, AnyMap};
+use core::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use spin::RwLock;
 
 /// A transaction provider.
 pub struct TxProvider {
@@ -24,72 +26,72 @@ pub struct TxProvider {
 }
 
 impl TxProvider {
-    /// Creates a new TX provider. 
+    /// Creates a new TX provider.
     pub fn new() -> Arc<Self> {
-        static NEXT_ID: AtomicU64 = AtomicU64::new();
-        Arc::new_cyclic(|weak_self| {
-            Self {
-                id: NEXT_ID.fetch_add(1, Relaxed),
-                initializer_map: RwLock::new(AnyMap::new()),
-                precommit_handlers: RwLock::new(Vec::new()),
-                commit_handlers: RwLock::new(Vec::new()),
-                abort_handlers: RwLock::new(Vec::new()),
-                weak_self.clone(),
-            }
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        Arc::new_cyclic(|weak_self| Self {
+            id: NEXT_ID.fetch_add(1, Relaxed),
+            initializer_map: RwLock::new(AnyMap::new()),
+            precommit_handlers: RwLock::new(Vec::new()),
+            commit_handlers: RwLock::new(Vec::new()),
+            abort_handlers: RwLock::new(Vec::new()),
+            weak_self: weak_self.clone(),
         })
     }
 
     /// Creates a new TX that is attached to this TX provider.
     pub fn new_tx(&self) -> Tx {
-        Tx::new(self.weak_self)
+        Tx::new(self.weak_self.clone())
     }
 
     /// Get the current TX.
-    /// 
+    ///
     /// # Panics
     ///
-    /// The caller of this method must be within the closure passed to 
+    /// The caller of this method must be within the closure passed to
     /// `Tx::context`. Otherwise, the method would panic.
     pub fn current(&self) -> CurrentTx<'_> {
         CurrentTx::new(self)
     }
 
     /// Register a per-TX data initializer.
-    /// 
+    ///
     /// The registered initializer function will be called upon the creation of
     /// a TX.
-    pub fn register_data_initializer<T, F>(&self, f: F)
+    pub fn register_data_initializer<T>(&self, f: Box<dyn Fn() -> T>)
     where
-        F: Fn() -> T,
         T: TxData,
     {
-        let f = Box::new(f) as Box<dyn Fn() -> T>;
+        // let f = Box::new(f) as Box<dyn Fn() -> T>;
         let mut initializer_map = self.initializer_map.write();
         initializer_map.insert(f);
     }
 
-    fn init_data<T: TxData>(&self) -> T {
+    fn init_data<T>(&self) -> T
+    where
+        T: TxData,
+    {
         let initializer_map = self.initializer_map.read();
-        let init_fn = initializer_map.get().unwrap();
+        let init_fn: &Box<dyn Fn() -> T> = initializer_map.get().unwrap();
         init_fn()
     }
 
     /// Register a callback for the pre-commit stage,
     /// which is before the commit stage.
-    /// 
-    /// Commiting a TX triggers the pre-commit stage as well as the commit
+    ///
+    /// Committing a TX triggers the pre-commit stage as well as the commit
     /// stage of the TX.
     /// On the pre-commit stage, the register callbacks will be called.
     /// Pre-commit callbacks are allowed to fail (unlike commit callbacks).
     /// If any pre-commit callbacks failed, the TX would be aborted and
     /// the commit callbacks would not get called.
-    pub fn register_precommit_handler<F>(&self, f: F) 
+    pub fn register_precommit_handler<F>(&self, f: F)
     where
-        F: Fn(CurrentTx<'_>) -> Result<()>,
+        F: Fn(CurrentTx<'_>) -> Result<()> + 'static,
     {
         let f = Box::new(f) as Box<dyn Fn(CurrentTx<'_>) -> Result<()>>;
         let mut precommit_handlers = self.precommit_handlers.write();
-        precommit_handlers.insert(f);
+        precommit_handlers.push(f);
     }
 
     fn call_precommit_handlers(&self) -> Result<()> {
@@ -103,17 +105,17 @@ impl TxProvider {
 
     /// Register a callback for the commit stage,
     /// which is after the pre-commit stage.
-    /// 
-    /// Commiting a TX triggers first the pre-commit stage of the TX and then 
+    ///
+    /// Committing a TX triggers first the pre-commit stage of the TX and then
     /// the commit stage. The callbacks for the commit stage is not allowed
     /// to fail.
-    pub fn register_commit_handler<F>(&self, f: F) 
+    pub fn register_commit_handler<F>(&self, f: F)
     where
-        F: Fn(CurrentTx<'_>)
+        F: Fn(CurrentTx<'_>) + 'static,
     {
         let f = Box::new(f) as Box<dyn Fn(CurrentTx<'_>)>;
         let mut commit_handlers = self.commit_handlers.write();
-        commit_handlers.insert(f);
+        commit_handlers.push(f);
     }
 
     fn call_commit_handlers(&self) {
@@ -125,16 +127,16 @@ impl TxProvider {
     }
 
     /// Register a callback for the abort stage.
-    /// 
-    /// A TX enters the abort stage when the TX is aborted by the user 
+    ///
+    /// A TX enters the abort stage when the TX is aborted by the user
     /// (via `Tx::abort`) or by a callback in the pre-commit stage.
-    pub fn register_abort_handler<F>(&self, f: F) 
+    pub fn register_abort_handler<F>(&self, f: F)
     where
-        F: Fn(CurrentTx<'_>)
+        F: Fn(CurrentTx<'_>) + 'static,
     {
         let f = Box::new(f) as Box<dyn Fn(CurrentTx<'_>)>;
         let mut abort_handlers = self.abort_handlers.write();
-        abort_handlers.insert(f);
+        abort_handlers.push(f);
     }
 
     fn call_abort_handlers(&self) {
@@ -156,7 +158,7 @@ pub struct Tx {
 
 impl Tx {
     fn new(provider: Weak<TxProvider>) -> Self {
-        static NEXT_ID: AtomicU64 = AtomicU64::new();
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
         Self {
             id: NEXT_ID.fetch_add(1, Relaxed),
@@ -167,7 +169,7 @@ impl Tx {
     }
 
     /// Enter the context of the TX.
-    /// 
+    ///
     /// While within the context of a TX, the implementation side of a TX
     /// can get the current TX via `TxProvider::current`.
     pub fn context<F, R>(&mut self, f: F) -> R
@@ -176,7 +178,7 @@ impl Tx {
     {
         assert!(self.status() == TxStatus::Ongoing);
 
-        current::set_and_exec_with(self, move || f() )
+        current::set_and_exec_with(self, move || f())
     }
 
     /// Returns the TX ID.
@@ -185,33 +187,41 @@ impl Tx {
     }
 
     /// Commits the TX.
-    /// 
+    ///
     /// If the returned value is `Ok`, then the TX is committed successfully.
     /// Otherwise, the TX is aborted.
     pub fn commit(&mut self) -> Result<()> {
         debug_assert!(self.status() == TxStatus::Ongoing);
 
-        self.context(|| {
-            let res = self.provider().call_precommit_handlers();
+        let provider = self.provider();
+        let res = self.context(|| {
+            let res = provider.call_precommit_handlers();
             if res.is_ok() {
-                self.provider().call_commit_handlers();
-                self.status = TxStatus::Committed;
+                provider.call_commit_handlers();
             } else {
-                self.provider().call_abort_handlers();
-                self.status = TxStatus::Abort;
+                provider.call_abort_handlers();
             }
             res
         });
+
+        if res.is_ok() {
+            self.status = TxStatus::Committed;
+        } else {
+            self.status = TxStatus::Abort;
+        };
+        res
     }
 
     /// Aborts the TX.
     pub fn abort(&mut self) {
         debug_assert!(self.status() == TxStatus::Ongoing);
 
+        let provider = self.provider();
         self.context(|| {
-            self.provider().call_abort_handlers();
-            self.status = TxStatus::Abort;
+            provider.call_abort_handlers();
         });
+
+        self.status = TxStatus::Abort;
     }
 
     /// Returns the status of the TX.
@@ -223,33 +233,41 @@ impl Tx {
         self.provider.upgrade().unwrap()
     }
 
-    fn data<T: TxData>(&mut self) -> &T {
-        self.data_mut()
+    fn data<T>(&mut self) -> &T
+    where
+        T: TxData,
+    {
+        self.data_mut::<T>()
     }
 
-    fn data_mut<T: TxData>(&mut self) -> &mut T {
-        // Fast path
-        if let Some(data) = self.data_map.get() {
-            return data
+    fn data_mut<T>(&mut self) -> &mut T
+    where
+        T: TxData,
+    {
+        let exists = self.data_map.contains::<T>();
+        if !exists {
+            // Slow path, need to initialize the data
+            let provider = self.provider();
+            let data: T = provider.init_data::<T>();
+            self.data_map.insert(data);
         }
 
-        // Slow path, need to initialize the data
-        let data = self.provider().init_data();
-        self.data_map.insert(data);
-        self.data_map.get().unwrap()
+        // Fast path
+        self.data_map.get_mut().unwrap()
     }
 }
 
 impl Drop for Tx {
     fn drop(&mut self) {
         assert!(
-            self.status() == TxStatus::Ongoing,
+            self.status() != TxStatus::Ongoing,
             "transactions must be committed or aborted explicitly"
         );
     }
 }
 
 /// The status of a transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TxStatus {
     Ongoing,
     Committed,
@@ -260,43 +278,45 @@ pub enum TxStatus {
 pub type TxId = u64;
 
 /// Per-transaction data.
-/// 
+///
 /// Using `TxProvider::register_data_initiailzer` to inject per-transaction data
-/// and using `CurrentTx::data_with` or `CurrentTx::data_mut_with` to access 
+/// and using `CurrentTx::data_with` or `CurrentTx::data_mut_with` to access
 /// per-transaction data.
-pub trait TxData: anymap::any::Any {
-}
+pub trait TxData: anymap::any::Any {}
 
 #[cfg(test)]
 mod test {
     use super::*;
     use alloc::collections::BTreeSet;
+    use spin::Mutex;
 
     /// `Db<T>` is a toy implementation of in-memory database for
     /// a set of items of type `T`.
-    /// 
+    ///
     /// The most interesting feature of `Db<T>` is the support
     /// of transactions. All queries and insertions to the database must
-    /// be performed within transactions. These transactions ensure 
+    /// be performed within transactions. These transactions ensure
     /// the atomicity of insertions even in the presence of concurrent execution.
     /// If transactions are aborted, their changes won't take effect.
-    /// 
-    /// The main limitation of `Db<T>` is that it only supports 
+    ///
+    /// The main limitation of `Db<T>` is that it only supports
     /// querying and inserting items, but not deleting.
     /// The lack of support of deletions rules out the possibilities
     /// of concurrent transactions conflicting with each other.
     pub struct Db<T> {
         all_items: Arc<Mutex<BTreeSet<T>>>,
-        tx_provider: TxProvider,
+        tx_provider: Arc<TxProvider>,
     }
 
     struct DbUpdate<T> {
         new_items: BTreeSet<T>,
     }
 
+    impl<T: 'static> TxData for DbUpdate<T> {}
+
     impl<T> Db<T>
     where
-        T: Ord 
+        T: Ord + 'static,
     {
         /// Creates an empty database.
         pub fn new() -> Self {
@@ -305,17 +325,18 @@ mod test {
                 tx_provider: TxProvider::new(),
             };
 
-            new_self.tx_provider.register_data_initializer(|| {
-                DbUpdate {
-                    new_items: BTreeSet::new()
-                }
-            });
+            new_self
+                .tx_provider
+                .register_data_initializer(Box::new(|| DbUpdate {
+                    new_items: BTreeSet::<T>::new(),
+                }));
             new_self.tx_provider.register_commit_handler({
                 let all_items = new_self.all_items.clone();
-                move |current: CurrentTx<'_>| {
-                    let update: &mut DbUpdate<T> = current.data_mut();
-                    let mut all_items = all_items.lock();
-                    all_items.append(&mut update.new_items);
+                move |mut current: CurrentTx<'_>| {
+                    current.data_mut_with(|update: &mut DbUpdate<T>| {
+                        let mut all_items = all_items.lock();
+                        all_items.append(&mut update.new_items);
+                    });
                 }
             });
 
@@ -324,33 +345,31 @@ mod test {
 
         /// Creates a new DB transaction.
         pub fn new_tx(&self) -> Tx {
-            self.tx_provider.new_tx();
+            self.tx_provider.new_tx()
         }
 
         /// Returns whether an item is contained.
-        /// 
+        ///
         /// # Transaction
-        /// 
+        ///
         /// This method must be called within the context of a transaction.
         pub fn contains(&self, item: &T) -> bool {
             let is_new_item = {
-                let current_tx = self.tx_provider.current();
-                current_tx.data_with(|update: &DbUpdate| {
-                    update.new_items.contains(item)
-                })
+                let mut current_tx = self.tx_provider.current();
+                current_tx.data_with(|update: &DbUpdate<T>| update.new_items.contains(item))
             };
             if is_new_item {
                 return true;
             }
 
             let all_items = self.all_items.lock();
-            all_items.0.contains(item)
+            all_items.contains(item)
         }
 
         /// Inserts a new item into the DB.
-        /// 
+        ///
         /// # Transaction
-        /// 
+        ///
         /// This method must be called within the context of a transaction.
         pub fn insert(&self, item: T) {
             let all_items = self.all_items.lock();
@@ -358,39 +377,37 @@ mod test {
                 return;
             }
 
-            let current_tx = self.tx_provider.current();
-            current_tx.data_mut_with(|update: &mut DbUpdate| {
+            let mut current_tx = self.tx_provider.current();
+            current_tx.data_mut_with(|update: &mut DbUpdate<_>| {
                 update.new_items.insert(item);
             });
         }
 
         /// Collects all items of the DB.
-        /// 
+        ///
         /// # Transaction
-        /// 
+        ///
         /// This method must be called within the context of a transaction.
         pub fn collect(&self) -> Vec<T>
         where
-            T: Copy 
+            T: Copy,
         {
             let all_items = self.all_items.lock();
-            let current_tx = self.tx_provider.current();
-            current_tx.data_with(|update: &DbUpdate| {
+            let mut current_tx = self.tx_provider.current();
+            current_tx.data_with(|update: &DbUpdate<T>| {
                 all_items.union(&update.new_items).cloned().collect()
             })
         }
 
         /// Returns the number of items in the DB.
-        /// 
+        ///
         /// # Transaction
-        /// 
+        ///
         /// This method must be called within the context of a transaction.
         pub fn len(&self) -> usize {
             let all_items = self.all_items.lock();
-            let current_tx = self.tx_provider.current();
-            let new_items_len = current_tx.data_with(|update: &DbUpdate| {
-                update.new_items.len()
-            });
+            let mut current_tx = self.tx_provider.current();
+            let new_items_len = current_tx.data_with(|update: &DbUpdate<T>| update.new_items.len());
             all_items.len() + new_items_len
         }
     }
@@ -399,7 +416,9 @@ mod test {
     fn commit_takes_effect() {
         let db: Db<u32> = Db::new();
         let items = vec![1, 2, 3];
-        new_tx_and_insert_items(&db, &items).commit().unwrap();
+        new_tx_and_insert_items::<u32, alloc::vec::IntoIter<u32>>(&db, items.clone().into_iter())
+            .commit()
+            .unwrap();
         assert!(collect_items(&db) == items);
     }
 
@@ -407,14 +426,14 @@ mod test {
     fn abort_has_no_effect() {
         let db: Db<u32> = Db::new();
         let items = vec![1, 2, 3];
-        new_tx_and_insert_items(&db, &items).abort();
+        new_tx_and_insert_items::<u32, alloc::vec::IntoIter<u32>>(&db, items.into_iter()).abort();
         assert!(collect_items(&db).len() == 0);
     }
 
-    fn new_tx_and_insert_items<T, I>(db: &Db<T>, new_items: I) -> Tx<T>
+    fn new_tx_and_insert_items<T, I>(db: &Db<T>, new_items: I) -> Tx
     where
         I: Iterator<Item = T>,
-        T: Copy,
+        T: Copy + Ord + 'static,
     {
         let mut tx = db.new_tx();
         tx.context(move || {
@@ -427,10 +446,11 @@ mod test {
 
     fn collect_items<T>(db: &Db<T>) -> Vec<T>
     where
-        T: Copy, 
+        T: Copy + Ord + 'static,
     {
-        let tx = db.new_tx();
-        tx.context(|| db.collect());
-        tx.commit();
+        let mut tx = db.new_tx();
+        let items = tx.context(|| db.collect());
+        tx.commit().unwrap();
+        items
     }
 }
