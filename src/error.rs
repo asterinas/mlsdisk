@@ -9,6 +9,12 @@ pub enum Errno {
     NoMemory,
     IoError,
     NotEnoughSpace,
+    /// OS-specific unknown error.
+    OsSpecUnknown,
+    /// Encryption operation failed.
+    EncryptFault,
+    /// Decryption operation failed.
+    DecryptFault,
 }
 
 /// error used in this crate
