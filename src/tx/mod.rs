@@ -11,7 +11,8 @@ pub use self::current::CurrentTx;
 
 use crate::prelude::*;
 use alloc::sync::{Arc, Weak};
-use anymap::{any::Any, AnyMap};
+use anymap::hashbrown::AnyMap;
+use core::any::Any;
 use core::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use spin::RwLock;
 
@@ -282,10 +283,13 @@ pub type TxId = u64;
 /// Using `TxProvider::register_data_initiailzer` to inject per-transaction data
 /// and using `CurrentTx::data_with` or `CurrentTx::data_mut_with` to access
 /// per-transaction data.
-pub trait TxData: anymap::any::Any {}
+pub trait TxData: Any {}
+
+unsafe impl Send for TxProvider {}
+unsafe impl Sync for TxProvider {}
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use alloc::collections::BTreeSet;
     use spin::Mutex;
