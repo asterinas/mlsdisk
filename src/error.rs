@@ -43,6 +43,12 @@ impl Error {
     }
 }
 
+impl From<Errno> for Error {
+    fn from(errno: Errno) -> Self {
+        Error::new(errno)
+    }
+}
+
 #[macro_export]
 macro_rules! return_errno {
     ($errno: expr) => {
