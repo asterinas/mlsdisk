@@ -1,6 +1,9 @@
-use self::journaling::{Journal, JournalCompactPolicy};
-use super::chunk::{ChunkAlloc, ChunkAllocEdit};
-use super::raw_log::{RawLog, RawLogId, RawLogStore};
+//! A store of transactional logs.
+use self::edit::{OpenLogTable, TxLogEdit, TxLogStoreEdit};
+use self::journaling::{AllState, Journal, JournalCompactPolicy};
+use self::state::{State, TxLogEntry, TxLogStoreState};
+use super::chunk::{ChunkAlloc, ChunkAllocEdit, ChunkAllocState};
+use super::raw_log::{RawLog, RawLogId, RawLogStore, RawLogStoreEdit, RawLogStoreState};
 use crate::layers::bio::{BlockBuf, BlockId, BlockSet};
 use crate::layers::crypto::{CryptoLog, RootMhtMeta};
 use crate::layers::edit::{Edit, EditJournalMeta};
@@ -11,214 +14,22 @@ use spin::Mutex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+pub type TxLogId = RawLogId;
+
+type BucketName = Arc<String>;
+
 /// A store of transactional logs.
 pub struct TxLogStore<D> {
     state: Arc<Mutex<State>>,
     key: Key,
     raw_log_store: Arc<RawLogStore<D>>,
-    journal: Arc<Journal<D>>,
+    journal: Arc<Mutex<Journal<D>>>,
     tx_provider: Arc<TxProvider>,
 }
-
-pub type TxLogId = RawLogId;
 
 struct Superblock {
     journal_area_meta: EditJournalMeta,
     chunk_area_nblocks: usize,
-}
-
-impl Superblock {
-    /// Returns the total number of blocks occupied by the `TxLogStore`.
-    pub fn total_nblocks(&self) -> usize {
-        self.journal_area_meta.total_nblocks() + self.chunk_area_nblocks
-    }
-}
-
-/// The volatile and persistent state of a `TxLogStore`.
-struct State {
-    persistent: TxLogStoreState,
-    log_table: BTreeMap<TxLogId, Arc<LazyDelete<RawLogId>>>,
-}
-
-/// The persistent state of a `TxLogStore`.
-struct TxLogStoreState {
-    log_table: BTreeMap<TxLogId, TxLogEntry>,
-    bucket_table: BTreeMap<BucketName, Bucket>,
-}
-
-struct TxLogEntry {
-    bucket: BucketName,
-    key: Key,
-    root_mht: RootMhtMeta,
-}
-
-type BucketName = Arc<String>;
-
-struct Bucket {
-    log_ids: BTreeSet<TxLogId>,
-}
-
-struct TxLogStoreEdit {
-    edit_table: BTreeMap<TxLogId, TxLogEdit>,
-}
-
-enum TxLogEdit {
-    Create(TxLogCreate),
-    Append(TxLogAppend),
-    Delete,
-}
-
-struct TxLogCreate {
-    bucket: BucketName,
-    key: Key,
-    root_mht: Option<RootMhtMeta>,
-}
-
-struct TxLogAppend {
-    root_mht: RootMhtMeta,
-}
-
-// Used for per-tx data, track open logs in memory
-struct OpenLogTable<D> {
-    log_table: BTreeMap<TxLogId, Arc<TxLogInner<D>>>,
-}
-
-/*
-struct State {
-    persistent: TxLogStoreState,
-    log_table: BTreeMap<TxLogId, Arc<LazyDelete<RawLogId>>>,
-}
- */
-impl<D> State<D> {
-    pub fn new(persistent: TxLogStoreState, raw_log_store: &Arc<RawLogStore<D>>) -> Self {
-        todo!("init LazyDelete")
-    }
-
-    pub fn apply(&mut self, edit: &TxLogStoreEdit) {
-        edit.apply_to(&mut self.persistent); // apply edit to self.persistent
-
-        // Do lazy deletion of logs
-        let deleted_log_ids = edit.edit_table.iter_deleted_logs();
-        for deleted_log_id in deleted_log_ids {
-            let Some(lazy_delete) = self.log_table.remove(deleted_log_id) else {
-                // Other concurrent TXs have deleted the same log
-                continue;
-            };
-            LazyDelete::delete(&lazy_delete);
-        }
-    }
-}
-
-impl Edit<TxLogStoreState> for TxLogStoreEdit {
-    fn apply_to(&self, state: &mut TxLogStoreState) {
-        for (log_id, log_edit) in &self.edit_table {
-            match log_edit {
-                TxLogEdit::Create(create_log) => {
-                    let TxLogCreate {
-                        bucket,
-                        key,
-                        root_mht,
-                        ..
-                    } = create_log;
-                    state.create_log(log_id, bucket, key, root_mht.unwrap());
-                }
-                TxLogEdit::Append(append_log) => {
-                    let TxLogAppend { root_mht, .. } = append_log;
-                    state.append_log(root_mht);
-                }
-                TxLogEdit::Delete => {
-                    state.delete_log(log_id);
-                }
-            }
-        }
-    }
-}
-
-/*
-struct TxLogStoreState {
-    log_table: BTreeMap<TxLogId, TxLogEntry>,
-    bucket_table: BTreeMap<BucketName, Bucket>,
-}
- */
-impl TxLogStoreState {
-    pub fn create_log(
-        &mut self,
-        new_log_id: TxLogId,
-        bucket: BucketName,
-        key: Key,
-        root_mht: RootMhtMeta,
-    ) {
-        todo!()
-    }
-
-    pub fn append_log(&mut self, root_mht: RootMhtMeta) {
-        todo!()
-    }
-
-    pub fn list_logs(&self, bucket_name: &str) -> Result<BTreeSet<TxLogId>> {
-        let bucket = self.bucket_table.get(bucket_name).ok_or(Error::NotFound)?;
-        Ok(bucket.log_ids.clone());
-    }
-
-    pub fn find_log(&self, log_id: TxLogId) -> Result<&TxLogEntry> {
-        self.log_table.get(&log_id).ok_or(Error::NotFound)
-    }
-
-    pub fn contains_log(&self, log_id: TxLogId) -> bool {
-        self.log_table.contains(&log_id)
-    }
-
-    pub fn delete_log(&mut self, log_id: TxLogId) {
-        // Do not check the result because concurrent TXs may decide to delete
-        // the same logs.
-        let _ = self.log_table.remove(&log_id);
-    }
-}
-
-/*
-struct TxLogStoreEdit {
-    edit_table: BTreeMap<TxLogId, TxLogEdit>,
-}
- */
-impl TxLogStoreEdit {
-    pub fn is_log_deleted(&self, log_id: TxLogId) -> bool {
-        todo!()
-    }
-
-    pub fn is_log_created(&self, log_id: TxLogId) -> bool {
-        todo!()
-    }
-
-    pub fn delete_log(&mut self, log_id: TxLogId) -> Result<()> {
-        match self.edit_table.get_mut(&log_id) {
-            None => {
-                self.edit_table.insert(log_id, TxLogEdit::Delete);
-            }
-            Some(TxLogEdit::Create(_)) => {
-                self.edit_table.remove(&log_id);
-            }
-            Some(TxLogEdit::Append(_)) => {
-                panic!("TxLogEdit::Append is added at very late stage, after which logs won't get deleted");
-            }
-            Some(TxLogEdit::Delete) => {
-                return Err(Error::NotFound);
-            }
-        }
-        Ok(())
-    }
-
-    pub fn iter_deleted_logs(&self) -> impl Iterator<Item = TxLogId> {
-        self.edit_table.iter
-    }
-
-    pub fn update_log_metas<I>(&mut self, iter: I)
-    where
-        I: Iterator<Item = (TxLogId, RootMhtMeta)>,
-    {
-        // For newly-created logs, update RootMhtMeta
-        // For existing logs that are appended, add TxLogAppend
-        todo!()
-    }
 }
 
 impl<D: BlockSet> TxLogStore<D> {
@@ -227,46 +38,50 @@ impl<D: BlockSet> TxLogStore<D> {
     /// Each instance will be assigned a unique, automatically-generated root
     /// key.
     pub fn format(disk: D) -> Result<Self> {
-        todo!()
+        let tx_provider = TxProvider::new();
+        let tx_log_store_state = TxLogStoreState::new();
+
+        let chunk_alloc = ChunkAlloc::new(disk.nblocks(), tx_provider);
+        let raw_log_store = RawLogStore::new(disk, tx_provider, chunk_alloc);
+
+        let state = State::new(tx_log_store_state, &raw_log_store);
+        let all_state = AllState {
+            chunk_alloc: ChunkAllocState::new(disk.nblocks()),
+            raw_log_store: RawLogStoreState::new(),
+            tx_log_store: tx_log_store_state,
+        };
+        let journal = Journal::format(
+            all_state,
+            disk,
+            std::mem::size_of::<AllState>(),
+            JournalCompactPolicy {},
+        );
+
+        Ok(Self::from_parts(
+            tx_log_store_state,
+            Key::gen_unique(),
+            raw_log_store,
+            journal,
+            tx_provider,
+        ))
     }
 
     /// Recover an existing `TxLogStore` from a disk using the given key.
     pub fn recover(disk: D, key: Key) -> Result<Self> {
-        let sb = Superblock::open(disk.subset(0..1), key)?;
+        let sb: Superblock = Superblock::open(disk.subset(0..1), &key)?;
 
         if disk.nblocks() < sb.required_nblocks() {
-            return Err(Error::NotEnoughSpace);
+            return Err(ENOSPC);
         }
 
         let tx_provider = TxProvider::new();
 
+        let journal_area_size = sb.journal_area_meta.total_nblocks();
         let journal = {
-            let journal_area_size = sb.journal_area_meta.total_nblocks();
             let journal_area = disk.subset(1..1 + journal_area_size);
-            let journal = Journal::recover(
-                journal_area,
-                &sb.journal_area_meta,
-                JournalCompactPolicy::new(),
-            )?;
+            let journal =
+                Journal::recover(journal_area, &sb.journal_area_meta, JournalCompactPolicy {})?;
             let journal = Arc::new(Mutex::new(journal));
-
-            tx_provider.register_commit_handler({
-                let journal = journal.clone();
-                |current| {
-                    let mut journal = journal.lock();
-                    current.data_with(|edit: &ChunkAllocEdit| {
-                        journal.add(edit);
-                    });
-                    current.data_with(|edit: &RawLogStoreEdit| {
-                        journal.add(edit);
-                    });
-                    current.data_with(|edit: &TxLogStoreEdit| {
-                        journal.add(edit);
-                    });
-                    journal.commit();
-                }
-            });
-
             journal
         };
 
@@ -294,7 +109,7 @@ impl<D: BlockSet> TxLogStore<D> {
         state: TxLogStoreState,
         key: Key,
         raw_log_store: RawLogStore<D>,
-        journal: Journal<D>,
+        journal: Arc<Mutex<Journal<D>>>,
         tx_provider: Arc<TxProvider>,
     ) -> Self {
         let new_self = Self {
@@ -332,6 +147,25 @@ impl<D: BlockSet> TxLogStore<D> {
                 Ok(())
             }
         });
+
+        // Commit handler for journal
+        tx_provider.register_commit_handler({
+            let journal = journal.clone();
+            |current| {
+                let mut journal = journal.lock();
+                current.data_with(|edit: &ChunkAllocEdit| {
+                    journal.add(edit);
+                });
+                current.data_with(|edit: &RawLogStoreEdit| {
+                    journal.add(edit);
+                });
+                current.data_with(|edit: &TxLogStoreEdit| {
+                    journal.add(edit);
+                });
+                journal.commit();
+            }
+        });
+        // Commit handler for store
         tx_provider.register_commit_handler({
             let state = new_self.state.clone();
             |current| {
@@ -356,7 +190,7 @@ impl<D: BlockSet> TxLogStore<D> {
 
         let mut log_id_set = state.list_logs(bucket_name)?;
         current_tx.data_with(|store_edit: &TxLogStoreEdit| {
-            for (log_id, log_edit) in &store_edit.edit_table {
+            for (log_id, log_edit) in &store_edit.edit_table() {
                 match log_edit {
                     TxLogEdit::Create(_) => {
                         log_id_set.insert(log_id);
@@ -380,7 +214,39 @@ impl<D: BlockSet> TxLogStore<D> {
     ///
     /// This method must be called within a TX. Otherwise, this method panics.
     pub fn create_log(&self, bucket: &str) -> Result<TxLog> {
-        todo!()
+        let raw_log = self.raw_log_store.create_log()?;
+        let log_id = raw_log.id();
+        let crypto_log = CryptoLog::new(raw_log, self.key);
+        let current_tx = self.tx_provider.current();
+        let tx_id = current_tx.id();
+        let lazy_delete = {
+            let raw_log_store = self.raw_log_store.clone();
+            let lazy_delete = LazyDelete::new(log_id, move |log_id| {
+                raw_log_store.delete_log(log_id).unwrap();
+            });
+            Arc::new(lazy_delete)
+        };
+        let inner_log = Arc::new(TxLogInner {
+            log_id,
+            tx_id,
+            bucket,
+            crypto_log,
+            lazy_delete,
+            is_dirty: false,
+        });
+
+        current_tx.data_with(|store_edit: &TxLogStoreEdit| {
+            store_edit.create_log(log_id, bucket, self.key)
+        });
+
+        current_tx.data_mut_with(|open_log_table: &mut OpenLogTable| {
+            open_log_table.log_table.insert(log_id, inner_log);
+        });
+
+        Ok(TxLog {
+            inner_log,
+            can_append: true,
+        })
     }
 
     /// Opens the log of a given ID.
@@ -391,11 +257,11 @@ impl<D: BlockSet> TxLogStore<D> {
     /// # Panics
     ///
     /// This method must be called within a TX. Otherwise, this method panics.
-    pub fn open_log(&self, log_id: TxLogId, can_append: bool) -> Result<TxLog> {
+    pub fn open_log(&self, log_id: TxLogId, can_append: bool) -> Result<Arc<TxLog>> {
         let mut current_tx = self.tx_provider.current();
         let inner_log = self.open_inner_log(log_id, can_append, &mut current_tx)?;
         let tx_log = TxLog::new(inner_log, can_append);
-        Ok(tx_log)
+        Ok(Arc::new(tx_log))
     }
 
     fn open_inner_log(
@@ -406,7 +272,7 @@ impl<D: BlockSet> TxLogStore<D> {
     ) -> Result<Arc<TxLogInner<D>>> {
         // Fast path: the log has been opened in this TX
         let has_opened = current_tx.data_with(|table: &OpenLogTable<D>| {
-            table.log_table.get(&log_id).map(|log| log.clone())
+            table.log_table().get(&log_id).map(|log| log.clone())
         });
         if let Some(inner_log) = has_opened {
             return Ok(inner_log);
@@ -416,21 +282,21 @@ impl<D: BlockSet> TxLogStore<D> {
         let state = self.state.lock();
         let log_entry = {
             // The log must exist in state...
-            let log_entry = state.find_log(log_id)?;
+            let log_entry: TxLogEntry = state.persistent().find_log(log_id)?;
             // ...and not be marked deleted by data.edit
             let is_deleted = current_tx
                 .data_with(|store_edit: &TxLogStoreEdit| store_edit.is_log_deleted(log_id));
             if is_deleted {
-                return Err(Error::NotFound);
+                return Err(ENOENT);
             }
             log_entry
         };
-        let bucket = log_entry.bucket.clone();
+        let bucket = log_entry.bucket().clone();
         let crypto_log = {
             let raw_log = self.raw_log_store.open_log(log_id, can_append)?;
-            let key = log_entry.key;
+            let key = log_entry.key();
             let root_meta = log_entry.root_meta;
-            CryptoLog::open(raw_log, key, root_meta)?;
+            CryptoLog::open(raw_log, key, root_meta)?
         };
         let tx_id = current_tx.id();
         let lazy_delete = {
@@ -451,8 +317,13 @@ impl<D: BlockSet> TxLogStore<D> {
         });
 
         current_tx.data_mut_with(|open_table: &mut OpenLogTable<D>| {
-            open_table.log_table.insert(log_id, inner_log.clone())
+            open_table.log_table().insert(log_id, inner_log.clone())
         });
+        if can_append {
+            current_tx.data_with(|store_edit: &TxLogStoreEdit| {
+                store_edit.append_log(log_id, crypto_log.root_meta.unwrap());
+            });
+        }
         Ok(inner_log)
     }
 
@@ -463,8 +334,8 @@ impl<D: BlockSet> TxLogStore<D> {
     /// This method must be called within a TX. Otherwise, this method panics.
     pub fn open_log_in(&self, bucket: &str) -> Result<Arc<TxLog<D>>> {
         let log_ids = self.list_logs(bucket)?;
-        let max_log_id = log_ids.iter().max().ok_or(Error::NotFound)?;
-        self.open_log(max_log_id)
+        let max_log_id = log_ids.iter().max().ok_or(ENOENT)?;
+        self.open_log(max_log_id, false)
     }
 
     /// Checks whether the log of a given log ID exists or not.
@@ -500,7 +371,7 @@ impl<D: BlockSet> TxLogStore<D> {
         let state = self.state.lock();
 
         if !self.do_contain_log(log_id, &state, &current_tx) {
-            return Err(Error::NotFound);
+            return Err(ENOENT);
         }
 
         current_tx
@@ -526,6 +397,17 @@ impl<D: BlockSet> TxLogStore<D> {
     }
 }
 
+impl Superblock {
+    /// Returns the total number of blocks occupied by the `TxLogStore`.
+    pub fn total_nblocks(&self) -> usize {
+        self.journal_area_meta.total_nblocks() + self.chunk_area_nblocks
+    }
+
+    pub fn open<D: BlockSet>(disk: D, key: &Key) -> Result<Self> {
+        todo!()
+    }
+}
+
 /// A transactional log.
 #[derive(Clone)]
 pub struct TxLog<D> {
@@ -538,7 +420,7 @@ struct TxLogInner<D> {
     tx_id: TxId,
     bucket: BucketName,
     crypto_log: CryptoLog<RawLog<D>>,
-    lazy_delete: Arc<LazyDelete<RawLogId>>,
+    lazy_delete: Arc<LazyDelete<u64>>,
     is_dirty: bool,
 }
 
@@ -586,11 +468,11 @@ impl<D> TxLog<D> {
     /// This method must be called within a TX. Otherwise, this method panics.
     pub fn append(&self, buf: &impl BlockBuf) -> Result<()> {
         if !self.can_append {
-            return Err(Error::NotPermitted);
+            return Err(EPERM);
         }
 
         self.inner_log.is_dirty = true;
-        self.inner_log.crypto_log.append(pos, buf)
+        self.inner_log.crypto_log.append(buf)
     }
 
     /// Returns the length of the log in unit of block.
@@ -605,37 +487,6 @@ impl<D> TxLog<D> {
 
 type Key = [u8; 16];
 
-mod journaling {
-    use super::super::chunk::ChunkAllocState;
-    use super::super::raw_log::RawLogStoreState;
-    use super::TxLogStoreState;
-    use crate::layers::edit::{CompactPolicy, Edit, EditJournal};
-
-    pub type Journal<D> = EditJournal<AllState, D, JournalCompactPolicy>;
-
-    pub struct AllState {
-        pub chunk_alloc: ChunkAllocState,
-        pub raw_log_store: RawLogStoreState,
-        pub tx_log_store: TxLogStoreState,
-    }
-
-    impl<E: Edit<ChunkAllocState>> Edit<AllState> for E {
-        fn apply_to(&mut self, state: &mut AllState) {
-            self.apply_to(&mut state.chunk_alloc)
-        }
-    }
-
-    impl<E: Edit<RawLogStoreState>> Edit<AllState> for E {
-        fn apply_to(&mut self, state: &mut AllState) {
-            self.apply_to(&mut state.raw_log_store)
-        }
-    }
-
-    impl<E: Edit<TxLogStoreState>> Edit<AllState> for E {
-        fn apply_to(&mut self, state: &mut AllState) {
-            self.apply_to(&mut state.tx_log_store)
-        }
-    }
-
-    pub type JournalCompactPolicy = NeverCompactPolicy;
-}
+mod edit;
+mod journaling;
+mod state;
