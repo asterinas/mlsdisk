@@ -1,4 +1,4 @@
-use super::BlockBuf;
+use super::{BufMut, BufRef};
 use crate::prelude::*;
 
 use inherit_methods_macro::inherit_methods;
@@ -14,11 +14,11 @@ use inherit_methods_macro::inherit_methods;
 /// concurrent appends are carried out as if they are done one by one.
 pub trait BlockLog: Sync + Send {
     /// Read one or multiple blocks at a specified position.
-    fn read(&self, pos: BlockId, buf: &mut impl BlockBuf) -> Result<()>;
+    fn read(&self, pos: BlockId, buf: BufMut) -> Result<()>;
 
     /// Append one or multiple blocks at the end,
     /// returning the ID of the first newly-appended block.
-    fn append(&self, buf: &impl BlockBuf) -> Result<BlockId>;
+    fn append(&self, buf: BufRef) -> Result<BlockId>;
 
     /// Ensure that blocks are persisted to the disk.
     fn flush(&self) -> Result<()>;
@@ -27,19 +27,19 @@ pub trait BlockLog: Sync + Send {
     fn nblocks(&self) -> usize;
 }
 
-macro_rules! impl_blocklog_pointer {
+macro_rules! impl_blocklog_for {
     ($typ:ty,$from:tt) => {
         #[inherit_methods(from = $from)]
         impl<T: BlockLog> BlockLog for $typ {
-            fn read(&self, pos: BlockId, buf: &mut impl BlockBuf) -> Result<()>;
-            fn append(&self, buf: &impl BlockBuf) -> Result<BlockId>;
+            fn read(&self, pos: BlockId, buf: BufMut) -> Result<()>;
+            fn append(&self, buf: BufRef) -> Result<BlockId>;
             fn flush(&self) -> Result<()>;
             fn nblocks(&self) -> usize;
         }
     };
 }
 
-impl_blocklog_pointer!(&T, "(**self)");
-// impl_blocklog_pointer!(&mut T, "(**self)");
-impl_blocklog_pointer!(Box<T>, "(**self)");
-impl_blocklog_pointer!(Arc<T>, "(**self)");
+impl_blocklog_for!(&T, "(**self)");
+impl_blocklog_for!(&mut T, "(**self)");
+impl_blocklog_for!(Box<T>, "(**self)");
+impl_blocklog_for!(Arc<T>, "(**self)");

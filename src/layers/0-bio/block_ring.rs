@@ -1,4 +1,5 @@
-use super::{BlockBuf, BlockLog, BlockSet};
+use super::{BlockLog, BlockSet, BufMut, BufRef};
+use crate::os::Mutex;
 use crate::prelude::*;
 
 /// `BlockRing<S>` emulates a blocks log (`BlockLog`) with infinite
@@ -29,7 +30,7 @@ use crate::prelude::*;
 pub struct BlockRing<S> {
     storage: S,
     // The cursor for appending new blocks
-    cursor: Option<BlockId>,
+    cursor: Mutex<Option<BlockId>>,
 }
 
 impl<S: BlockSet> BlockRing<S> {
@@ -37,7 +38,7 @@ impl<S: BlockSet> BlockRing<S> {
     pub fn new(storage: S) -> Self {
         Self {
             storage,
-            cursor: None,
+            cursor: Mutex::new(None),
         }
     }
 
@@ -47,25 +48,32 @@ impl<S: BlockSet> BlockRing<S> {
     ///
     /// Calling the `append` method without setting the append cursor first
     /// via this method `set_cursor` causes panic.
-    pub fn set_cursor(&mut self, new_cursor: BlockId) {
-        self.cursor = Some(new_cursor);
+    pub fn set_cursor(&self, new_cursor: BlockId) {
+        *self.cursor.lock() = Some(new_cursor);
+    }
+
+    // Return a reference to the underlying storage.
+    pub fn storage(&self) -> &S {
+        &self.storage
     }
 }
 
 impl<S: BlockSet> BlockLog for BlockRing<S> {
-    fn read(&self, pos: BlockId, buf: &mut impl BlockBuf) -> Result<()> {
+    fn read(&self, pos: BlockId, buf: BufMut) -> Result<()> {
         let pos = pos % self.storage.nblocks();
         self.storage.read(pos, buf)
     }
 
-    fn append(&self, buf: &impl BlockBuf) -> Result<BlockId> {
+    fn append(&self, buf: BufRef) -> Result<BlockId> {
         let cursor = self
             .cursor
+            .lock()
             .expect("cursor must be set before appending new blocks");
         let pos = cursor % self.storage.nblocks();
-        let cursor = cursor + buf.nblocks();
-        // self.cursor.insert(cursor);
-        self.storage.write(pos, buf).map(|_| cursor)
+        let new_cursor = cursor + buf.nblocks();
+        self.storage.write(pos, buf)?;
+        self.set_cursor(new_cursor);
+        Ok(cursor)
     }
 
     fn flush(&self) -> Result<()> {
@@ -73,6 +81,33 @@ impl<S: BlockSet> BlockLog for BlockRing<S> {
     }
 
     fn nblocks(&self) -> usize {
-        self.cursor.unwrap_or(0)
+        self.cursor.lock().unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BlockRing;
+    use crate::layers::bio::{BlockLog, Buf, MemDisk};
+
+    #[test]
+    fn block_ring() {
+        let num_blocks = 16;
+        let disk = MemDisk::create(num_blocks).unwrap();
+        let block_ring = BlockRing::new(disk);
+        block_ring.set_cursor(num_blocks);
+        assert_eq!(block_ring.nblocks(), num_blocks);
+
+        let mut append_buf = Buf::alloc(1).unwrap();
+        append_buf.as_mut_slice().fill(1);
+        let pos = block_ring.append(append_buf.as_ref()).unwrap();
+        assert_eq!(pos, num_blocks);
+        assert_eq!(block_ring.nblocks(), num_blocks + 1);
+
+        let mut read_buf = Buf::alloc(1).unwrap();
+        block_ring
+            .read(pos % num_blocks, read_buf.as_mut())
+            .unwrap();
+        assert_eq!(read_buf.as_slice(), append_buf.as_slice());
     }
 }

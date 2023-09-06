@@ -10,7 +10,9 @@ use openssl::symm::{decrypt, decrypt_aead, encrypt, encrypt_aead, Cipher};
 use serde::{Deserialize, Serialize};
 
 /// Reuse the `Mutex` and `MutexGuard` implementation.
-pub use spin::{Mutex, MutexGuard};
+pub use spin::{
+    Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockUpgradableGuard, RwLockWriteGuard,
+};
 
 /// Unique ID for the OS thread.
 #[derive(PartialEq, Eq, Debug)]
@@ -76,6 +78,10 @@ pub struct Pages {
     len: usize,
     _p: PhantomData<[u8]>,
 }
+
+// SAFETY: `Pages` owns the memory buffer, so it can be safely
+// transferred across threads.
+unsafe impl Send for Pages {}
 
 impl Pages {
     /// Allocate specific number of pages.

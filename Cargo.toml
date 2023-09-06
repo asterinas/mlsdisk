@@ -17,6 +17,8 @@ static_assertions = "1.1.0"
 typetag = "0.2"
 openssl = "0.10.55"
 libc = "0.2.147"
+log = "0.4"
+lending-iterator = "0.1.7"
 
 [lib]
 doctest = false
