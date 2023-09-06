@@ -15,6 +15,8 @@ pub enum Errno {
     EncryptFault,
     /// Decryption operation failed.
     DecryptFault,
+    /// Not aligned to `BLOCK_SIZE`.
+    NonBlockAlignedSizeError,
 }
 
 /// error used in this crate
