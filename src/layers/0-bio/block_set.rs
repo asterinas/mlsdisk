@@ -171,14 +171,14 @@ impl BlockSet for MemDisk {
     }
 
     fn subset(&self, range: Range<BlockId>) -> Result<Self> {
-        if range.end > self.region.end {
+        if self.region.start + range.end > self.region.end {
             return_errno_with_msg!(Errno::InvalidArgs, "subset is out of range");
         }
 
         Ok(MemDisk {
             disk: self.disk.clone(),
             region: Range {
-                start: range.start,
+                start: self.region.start + range.start,
                 end: self.region.start + range.end,
             },
         })
