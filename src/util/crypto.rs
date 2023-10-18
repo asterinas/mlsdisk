@@ -1,10 +1,6 @@
 use crate::prelude::Result;
 use core::ops::Deref;
 
-pub type Key = [u8; 16];
-pub type Mac = [u8; 16];
-pub type Iv = [u8; 12];
-
 /// Random initialization for Key, Iv and Mac.
 pub trait RandomInit: Default {
     fn random() -> Self;

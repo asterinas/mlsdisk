@@ -7,6 +7,7 @@ use core::ptr::NonNull;
 use libc;
 use openssl::rand::rand_bytes;
 use openssl::symm::{decrypt, decrypt_aead, encrypt, encrypt_aead, Cipher};
+use pod::Pod;
 use serde::{Deserialize, Serialize};
 
 /// Reuse the `Mutex` and `MutexGuard` implementation.
@@ -140,8 +141,8 @@ impl crate::util::Rng for Rng {
 /// A macro to define byte_array_types used by `Aead` or `Skcipher`.
 macro_rules! new_byte_array_type {
     ($name:ident, $n:expr) => {
-        #[repr(transparent)]
-        #[derive(Clone, Debug, Default, Deserialize, Serialize)]
+        #[repr(C)]
+        #[derive(Copy, Clone, Pod, Debug, Default, Deserialize, Serialize)]
         pub struct $name([u8; $n]);
 
         impl core::ops::Deref for $name {
