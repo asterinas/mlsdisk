@@ -31,6 +31,12 @@ pub struct Buf(Pages);
 impl Buf {
     /// Allocate specific number of blocks as memory buffer.
     pub fn alloc(num_blocks: usize) -> Result<Self> {
+        if num_blocks == 0 {
+            return_errno_with_msg!(
+                InvalidArgs,
+                "num_blocks must be greater than 0 for allocation"
+            )
+        }
         let pages = Pages::alloc(num_blocks)?;
         Ok(Self(pages))
     }
@@ -89,7 +95,7 @@ impl<'a> TryFrom<&'a [u8]> for BufRef<'a> {
 
     fn try_from(buf: &'a [u8]) -> Result<Self> {
         if buf.len() % BLOCK_SIZE != 0 {
-            return_errno!(Errno::NonBlockAlignedSizeError);
+            return_errno!(Errno::NotBlockSizeAligned);
         }
         let new_self = Self(buf);
         Ok(new_self)
@@ -137,7 +143,7 @@ impl<'a> TryFrom<&'a mut [u8]> for BufMut<'a> {
 
     fn try_from(buf: &'a mut [u8]) -> Result<Self> {
         if buf.len() % BLOCK_SIZE != 0 {
-            return_errno!(Errno::NonBlockAlignedSizeError);
+            return_errno!(Errno::NotBlockSizeAligned);
         }
         let new_self = Self(buf);
         Ok(new_self)

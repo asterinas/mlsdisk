@@ -61,6 +61,8 @@ pub struct EditJournal<
 /// The metadata of an edit journal.
 ///
 /// The metadata is mainly useful when recovering an edit journal after a reboot.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Debug)]
 pub struct EditJournalMeta {
     /// The number of blocks reserved for storing a snapshot `CryptoBlob`.
     pub snapshot_area_nblocks: usize,
@@ -357,14 +359,14 @@ where
             CryptoBlob::<D>::HEADER_NBYTES + state_max_nbytes + Snapshot::<D>::meta_len();
         let blob_blocks = (blob_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE;
         if 2 * blob_blocks >= disk.nblocks() {
-            return_errno_with_msg!(NotEnoughSpace, "the block_set for journal is too small");
+            return_errno_with_msg!(OutOfDisk, "the block_set for journal is too small");
         };
         let mut buf = Buf::alloc(blob_blocks)?;
 
         // Serialize snapshot (state + metadata).
         let snapshot = Snapshot::create(init_state.clone(), 0);
         let serialized = postcard::to_slice(snapshot.as_ref(), buf.as_mut_slice())
-            .map_err(|_| Error::with_msg(NotEnoughSpace, "serialize snapshot failed"))?;
+            .map_err(|_| Error::with_msg(OutOfDisk, "serialize snapshot failed"))?;
 
         // Persist snapshot to `CryptoBlob`.
         let block_set0 = disk.subset(0..blob_blocks)?;
@@ -398,7 +400,7 @@ where
         let snapshot0_res = match blob0.read(buf.as_mut_slice()) {
             Ok(snapshot_len) => {
                 postcard::from_bytes::<Snapshot<S>>(&buf.as_slice()[..snapshot_len])
-                    .map_err(|_| Error::with_msg(NotEnoughSpace, "deserialize snapshot0 failed"))
+                    .map_err(|_| Error::with_msg(OutOfDisk, "deserialize snapshot0 failed"))
                     .map(|snapshot| Arc::new(snapshot))
             }
             Err(_) => Err(Error::with_msg(NotFound, "failed to read snapshot0")),
@@ -406,7 +408,7 @@ where
         let snapshot1_res = match blob1.read(buf.as_mut_slice()) {
             Ok(snapshot_len) => {
                 postcard::from_bytes::<Snapshot<S>>(&buf.as_slice()[..snapshot_len])
-                    .map_err(|_| Error::with_msg(NotEnoughSpace, "deserialize snapshot1 failed"))
+                    .map_err(|_| Error::with_msg(OutOfDisk, "deserialize snapshot1 failed"))
                     .map(|snapshot| Arc::new(snapshot))
             }
             Err(_) => Err(Error::with_msg(NotFound, "failed to read snapshot1")),
@@ -456,7 +458,7 @@ where
     pub fn persist(&mut self, latest: Arc<Snapshot<S>>) -> Result<()> {
         // Serialize the latest snapshot.
         let buf = postcard::to_slice(latest.as_ref(), self.buf.as_mut_slice())
-            .map_err(|_| Error::with_msg(NotEnoughSpace, "serialize current state failed"))?;
+            .map_err(|_| Error::with_msg(OutOfDisk, "serialize current state failed"))?;
 
         // Persist the latest snapshot to `CryptoBlob`.
         let index = (self.latest_index + 1) % 2; // switch the `latest_index`
@@ -630,7 +632,7 @@ impl<E: Edit<S>, S: Sized> WriteBuf<E, S> {
                         e
                     );
                 }
-                return_errno_with_msg!(NotEnoughSpace, "no space for new Record in WriteBuf");
+                return_errno_with_msg!(OutOfDisk, "no space for new Record in WriteBuf");
             }
         }
     }

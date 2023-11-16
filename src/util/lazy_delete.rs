@@ -96,3 +96,6 @@ impl<T> Drop for LazyDelete<T> {
         }
     }
 }
+
+unsafe impl<T> Send for LazyDelete<T> {}
+unsafe impl<T> Sync for LazyDelete<T> {}

@@ -80,7 +80,7 @@ impl<B: BlockSet> CryptoBlob<B> {
     pub fn create(block_set: B, init_data: &[u8]) -> Result<Self> {
         let capacity = block_set.nblocks() * BLOCK_SIZE - Self::HEADER_NBYTES;
         if init_data.len() > capacity {
-            return_errno_with_msg!(NotEnoughSpace, "init_data is too large");
+            return_errno_with_msg!(OutOfDisk, "init_data is too large");
         }
         let nblocks = (Self::HEADER_NBYTES + init_data.len() + BLOCK_SIZE - 1) / BLOCK_SIZE;
         let mut block_buf = Buf::alloc(nblocks)?;
@@ -129,7 +129,7 @@ impl<B: BlockSet> CryptoBlob<B> {
     /// known to an attacker.
     pub fn write(&mut self, buf: &[u8]) -> Result<VersionId> {
         if buf.len() > self.capacity() {
-            return_errno_with_msg!(NotEnoughSpace, "write data is too large");
+            return_errno_with_msg!(OutOfDisk, "write data is too large");
         }
         let nblocks = (Self::HEADER_NBYTES + buf.len() + BLOCK_SIZE - 1) / BLOCK_SIZE;
         let mut block_buf = Buf::alloc(nblocks)?;
@@ -178,10 +178,10 @@ impl<B: BlockSet> CryptoBlob<B> {
             }
         };
         if header.payload_len > self.capacity() {
-            return_errno_with_msg!(NotEnoughSpace, "payload_len is greater than the capacity");
+            return_errno_with_msg!(OutOfDisk, "payload_len is greater than the capacity");
         }
         if header.payload_len > buf.len() {
-            return_errno_with_msg!(NotEnoughSpace, "read_buf is too small");
+            return_errno_with_msg!(OutOfDisk, "read_buf is too small");
         }
         let nblock = (Self::HEADER_NBYTES + header.payload_len + BLOCK_SIZE - 1) / BLOCK_SIZE;
         let mut block_buf = Buf::alloc(nblock)?;
