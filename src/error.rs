@@ -5,18 +5,24 @@ pub enum Errno {
     TxAborted,
     /// Not found.
     NotFound,
+    /// Invalid arguments.
     InvalidArgs,
-    NoMemory,
-    IoError,
-    NotEnoughSpace,
+    /// Out of memory.
+    OutOfMemory,
+    /// Out of disk space.
+    OutOfDisk,
+    /// IO error.
+    IoFailed,
+    /// Permission denied.
+    PermissionDenied,
     /// OS-specific unknown error.
     OsSpecUnknown,
     /// Encryption operation failed.
-    EncryptFault,
+    EncryptFailed,
     /// Decryption operation failed.
-    DecryptFault,
+    DecryptFailed,
     /// Not aligned to `BLOCK_SIZE`.
-    NonBlockAlignedSizeError,
+    NotBlockSizeAligned,
 }
 
 /// error used in this crate

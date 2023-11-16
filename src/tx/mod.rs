@@ -359,7 +359,7 @@ mod tests {
         /// This method must be called within the context of a transaction.
         pub fn contains(&self, item: &T) -> bool {
             let is_new_item = {
-                let mut current_tx = self.tx_provider.current();
+                let current_tx = self.tx_provider.current();
                 current_tx.data_with(|update: &DbUpdate<T>| update.new_items.contains(item))
             };
             if is_new_item {
@@ -397,7 +397,7 @@ mod tests {
             T: Copy,
         {
             let all_items = self.all_items.lock();
-            let mut current_tx = self.tx_provider.current();
+            let current_tx = self.tx_provider.current();
             current_tx.data_with(|update: &DbUpdate<T>| {
                 all_items.union(&update.new_items).cloned().collect()
             })
@@ -410,7 +410,7 @@ mod tests {
         /// This method must be called within the context of a transaction.
         pub fn len(&self) -> usize {
             let all_items = self.all_items.lock();
-            let mut current_tx = self.tx_provider.current();
+            let current_tx = self.tx_provider.current();
             let new_items_len = current_tx.data_with(|update: &DbUpdate<T>| update.new_items.len());
             all_items.len() + new_items_len
         }

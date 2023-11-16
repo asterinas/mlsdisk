@@ -108,10 +108,7 @@ impl<L: BlockLog> CryptoChain<L> {
 
         let payload_len = footer.len as usize;
         if payload_len > Self::AVAIL_BLOCK_SIZE || payload_len > buf.len() {
-            return_errno_with_msg!(
-                NotEnoughSpace,
-                "wrong payload_len or the read_buf is too small"
-            );
+            return_errno_with_msg!(OutOfDisk, "wrong payload_len or the read_buf is too small");
         }
 
         // Check the footer MAC, to ensure the orderness and consecutiveness of blocks.
@@ -142,7 +139,7 @@ impl<L: BlockLog> CryptoChain<L> {
     /// The confidentiality of the block is guaranteed.
     pub fn append(&mut self, buf: &[u8]) -> Result<()> {
         if buf.len() > Self::AVAIL_BLOCK_SIZE {
-            return_errno_with_msg!(NotEnoughSpace, "append data is too large");
+            return_errno_with_msg!(OutOfDisk, "append data is too large");
         }
         let mut block_buf = Buf::alloc(1)?;
 

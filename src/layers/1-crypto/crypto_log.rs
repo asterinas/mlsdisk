@@ -885,7 +885,7 @@ impl<L: BlockLog> AppendDataBuf<L> {
 
     pub fn append_data_nodes(&mut self, nodes: Vec<Arc<DataNode>>) -> Result<()> {
         if self.is_full() {
-            return_errno_with_msg!(NoMemory, "cache out of capacity");
+            return_errno_with_msg!(OutOfMemory, "cache out of capacity");
         }
 
         self.node_queue.extend(nodes.into_iter());

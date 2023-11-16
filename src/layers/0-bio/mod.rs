@@ -1,3 +1,5 @@
+//! The layer of untrusted block I/O.
+
 use static_assertions::assert_eq_size;
 
 mod block_buf;

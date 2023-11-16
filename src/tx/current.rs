@@ -33,7 +33,11 @@ impl<'a> CurrentTx<'a> {
     }
 
     /// Get immutable access to some type of the per-transaction data within a closure.
-    pub fn data_with<T: TxData, F, R>(&mut self, f: F) -> R
+    ///
+    /// # Panics
+    ///
+    /// The `data_with` method must _not_ be called recursively.
+    pub fn data_with<T: TxData, F, R>(&self, f: F) -> R
     where
         F: FnOnce(&T) -> R,
     {
@@ -60,7 +64,7 @@ impl<'a> CurrentTx<'a> {
 ///
 /// # Panics
 ///
-/// The `set_with` method must _not_ be called recursively.
+/// The `set_and_exec_with` method must _not_ be called recursively.
 pub(super) fn set_and_exec_with<F, R>(tx: &mut Tx, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -93,10 +97,10 @@ where
 ///
 /// # Panics
 ///
-/// The `get_with` (or `get_mut_with`) method must be called within the closure
-/// of `set_with`.
+/// The `get_current_mut_with` method must be called within the closure
+/// of `set_and_exec_with`.
 ///
-/// In addition, the `get_with` (or `get_mut_with`) method must _not_ be called
+/// In addition, the `get_current_mut_with` method must _not_ be called
 /// recursively.
 fn get_current_mut_with<F, R>(f: F) -> R
 where
@@ -107,8 +111,8 @@ where
         let current_ptr = cell.replace(core::ptr::null_mut());
         assert!(
             current_ptr != ptr::null_mut(),
-            "get_mut_with must not
-            1) be called without calling set_mut_with first, or 
+            "get_current_mut_with must not
+            1) be called without calling set_and_exec_with first, or 
             2) be called recursively"
         );
 

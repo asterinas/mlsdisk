@@ -87,7 +87,10 @@ unsafe impl Send for Pages {}
 impl Pages {
     /// Allocate specific number of pages.
     pub fn alloc(len: usize) -> Result<Self> {
-        let ptr = PageAllocator::alloc(len).ok_or(Error::new(Errno::NoMemory))?;
+        let ptr = PageAllocator::alloc(len).ok_or(Error::with_msg(
+            Errno::OutOfMemory,
+            "page allocation failed",
+        ))?;
         Ok(Self {
             ptr,
             len,
@@ -206,7 +209,7 @@ impl crate::util::Aead for Aead {
         let mut mac = AeadMac::default();
 
         let result = encrypt_aead(Cipher::aes_128_gcm(), key, Some(iv), aad, input, &mut mac)
-            .map_err(|_| Error::new(Errno::EncryptFault))?;
+            .map_err(|_| Error::new(Errno::EncryptFailed))?;
         output.copy_from_slice(result.as_slice());
         Ok(mac)
     }
@@ -221,7 +224,7 @@ impl crate::util::Aead for Aead {
         output: &mut [u8],
     ) -> Result<()> {
         let result = decrypt_aead(Cipher::aes_128_gcm(), key, Some(iv), aad, input, mac)
-            .map_err(|_| Error::new(Errno::DecryptFault))?;
+            .map_err(|_| Error::new(Errno::DecryptFailed))?;
         output.copy_from_slice(result.as_slice());
         Ok(())
     }
@@ -255,7 +258,7 @@ impl crate::util::Skcipher for Skcipher {
         output: &mut [u8],
     ) -> Result<()> {
         let result = encrypt(Cipher::aes_128_ctr(), key, Some(iv), input)
-            .map_err(|_| Error::new(Errno::EncryptFault))?;
+            .map_err(|_| Error::new(Errno::EncryptFailed))?;
         output.copy_from_slice(result.as_slice());
         Ok(())
     }
@@ -268,7 +271,7 @@ impl crate::util::Skcipher for Skcipher {
         output: &mut [u8],
     ) -> Result<()> {
         let result = decrypt(Cipher::aes_128_ctr(), key, Some(iv), input)
-            .map_err(|_| Error::new(Errno::DecryptFault))?;
+            .map_err(|_| Error::new(Errno::DecryptFailed))?;
         output.copy_from_slice(result.as_slice());
         Ok(())
     }
