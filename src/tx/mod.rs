@@ -7,14 +7,16 @@
 //! when TXs are created, committed, or aborted by register callbacks.
 mod current;
 
-pub use self::current::CurrentTx;
-
-use crate::prelude::*;
 use alloc::sync::{Arc, Weak};
 use anymap::hashbrown::AnyMap;
 use core::any::Any;
-use core::sync::atomic::{AtomicU64, Ordering::Relaxed};
-use spin::RwLock;
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use hashbrown::HashMap;
+
+use crate::os::{Mutex, RwLock, Tid};
+use crate::prelude::*;
+
+pub use self::current::CurrentTx;
 
 /// A transaction provider.
 pub struct TxProvider {
@@ -24,6 +26,7 @@ pub struct TxProvider {
     commit_handlers: RwLock<Vec<Box<dyn Fn(CurrentTx<'_>)>>>,
     abort_handlers: RwLock<Vec<Box<dyn Fn(CurrentTx<'_>)>>>,
     weak_self: Weak<Self>,
+    tx_table: Mutex<HashMap<Tid, *mut Tx>>,
 }
 
 impl TxProvider {
@@ -37,6 +40,7 @@ impl TxProvider {
             commit_handlers: RwLock::new(Vec::new()),
             abort_handlers: RwLock::new(Vec::new()),
             weak_self: weak_self.clone(),
+            tx_table: Mutex::new(HashMap::new()),
         })
     }
 
@@ -155,6 +159,7 @@ pub struct Tx {
     provider: Weak<TxProvider>,
     data_map: AnyMap,
     status: TxStatus,
+    is_accessing_data: AtomicBool,
 }
 
 impl Tx {
@@ -166,6 +171,7 @@ impl Tx {
             provider,
             data_map: AnyMap::new(),
             status: TxStatus::Ongoing,
+            is_accessing_data: AtomicBool::new(false),
         }
     }
 
@@ -208,7 +214,7 @@ impl Tx {
         if res.is_ok() {
             self.status = TxStatus::Committed;
         } else {
-            self.status = TxStatus::Abort;
+            self.status = TxStatus::Aborted;
         };
         res
     }
@@ -222,7 +228,7 @@ impl Tx {
             provider.call_abort_handlers();
         });
 
-        self.status = TxStatus::Abort;
+        self.status = TxStatus::Aborted;
     }
 
     /// Returns the status of the TX.
@@ -272,7 +278,7 @@ impl Drop for Tx {
 pub enum TxStatus {
     Ongoing,
     Committed,
-    Abort,
+    Aborted,
 }
 
 /// The ID of a transaction.
