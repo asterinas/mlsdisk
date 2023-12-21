@@ -4,7 +4,6 @@ use crate::error::Errno;
 use crate::prelude::{Error, Result};
 use core::marker::PhantomData;
 use core::ptr::NonNull;
-use libc;
 use openssl::rand::rand_bytes;
 use openssl::symm::{decrypt, decrypt_aead, encrypt, encrypt_aead, Cipher};
 use pod::Pod;
@@ -15,18 +14,15 @@ pub use spin::{
     Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockUpgradableGuard, RwLockWriteGuard,
 };
 
-/// Unique ID for the OS thread.
-#[derive(PartialEq, Eq, Debug)]
-#[repr(transparent)]
-pub struct Tid(libc::pthread_t);
+/// Reuse `std::thread::ThreadId`.
+pub type Tid = std::thread::ThreadId;
 
 /// A struct to get the current thread id.
 pub struct CurrentThread;
 
 impl CurrentThread {
     pub fn id() -> Tid {
-        // SAFETY: calling extern "C" to get the thread_id is safe here.
-        Tid(unsafe { libc::pthread_self() })
+        std::thread::current().id()
     }
 }
 
