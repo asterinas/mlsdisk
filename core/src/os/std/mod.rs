@@ -24,10 +24,10 @@ pub use alloc::{
 /// Reuse implementations of `hashbrown` crate.
 pub use hashbrown::{HashMap, HashSet};
 
+pub use alloc::collections::BTreeMap;
+
 /// Reuse the `Mutex` and `MutexGuard` implementation.
-pub use spin::{
-    Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockUpgradableGuard, RwLockWriteGuard,
-};
+pub use spin::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// Reuse `std::thread::ThreadId`.
 pub type Tid = std::thread::ThreadId;
