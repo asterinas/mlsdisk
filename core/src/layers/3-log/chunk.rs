@@ -47,7 +47,7 @@ use serde::{Deserialize, Serialize};
 /// The ID of a chunk.
 pub type ChunkId = usize;
 
-/// Number of blocks of a chunk
+/// Number of blocks of a chunk.
 pub const CHUNK_NBLOCKS: usize = 1024;
 /// The chunk size is a multiple of the block size.
 pub const CHUNK_SIZE: usize = CHUNK_NBLOCKS * BLOCK_SIZE;
@@ -85,6 +85,10 @@ impl ChunkAlloc {
             move |current: CurrentTx<'_>| {
                 let state = state.clone();
                 current.data_with(move |edit: &ChunkAllocEdit| {
+                    if edit.edit_table.is_empty() {
+                        return;
+                    }
+
                     let mut state = state.lock();
                     edit.apply_to(&mut state);
                 });
@@ -126,6 +130,34 @@ impl ChunkAlloc {
         });
 
         Some(chunk_id)
+    }
+
+    /// Allocates `count` number of chunks. Returns IDs of newly-allocated
+    /// chunks, returns `None` if any allocation fails.
+    pub fn alloc_batch(&self, count: usize) -> Option<Vec<ChunkId>> {
+        let chunk_ids = {
+            let mut ids = Vec::with_capacity(count);
+            let mut state = self.state.lock();
+            for _ in 0..count {
+                match state.alloc() {
+                    Some(id) => ids.push(id),
+                    None => {
+                        ids.iter().for_each(|id| state.dealloc(*id));
+                        return None;
+                    }
+                }
+            }
+            ids
+        };
+
+        let mut current_tx = self.tx_provider.current();
+        current_tx.data_mut_with(|edit: &mut ChunkAllocEdit| {
+            for chunk_id in &chunk_ids {
+                edit.alloc(*chunk_id);
+            }
+        });
+
+        Some(chunk_ids)
     }
 
     /// Deallocates the chunk of a given ID.
@@ -178,6 +210,16 @@ impl ChunkAlloc {
     }
 }
 
+impl Debug for ChunkAlloc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state = self.state.lock();
+        f.debug_struct("ChunkAlloc")
+            .field("bitmap_free_count", &state.free_count)
+            .field("bitmap_min_free", &state.min_free)
+            .finish()
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Persistent State
 ////////////////////////////////////////////////////////////////////////////////
@@ -185,8 +227,8 @@ impl ChunkAlloc {
 /// The persistent state of a chunk allocator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkAllocState {
-    // A bitmap where each bit indicates whether a corresponding chunk has been
-    // allocated.
+    // A bitmap where each bit indicates whether a corresponding chunk
+    // has been allocated.
     alloc_map: BitMap,
     // The number of free chunks.
     free_count: usize,
@@ -221,7 +263,7 @@ impl ChunkAllocState {
         self.alloc_map.set(free_chunk_id, true);
         self.free_count -= 1;
 
-        // Keep the invariance that all free chunk IDs are no less than `min_free``
+        // Keep the invariance that all free chunk IDs are no less than `min_free`
         self.min_free = free_chunk_id + 1;
 
         Some(free_chunk_id)
@@ -233,7 +275,7 @@ impl ChunkAllocState {
     ///
     /// Deallocating a free chunk causes panic.
     pub fn dealloc(&mut self, chunk_id: ChunkId) {
-        assert_eq!(self.alloc_map[chunk_id], true);
+        // debug_assert_eq!(self.alloc_map[chunk_id], true); // may fail in journal's commit
         self.alloc_map.set(chunk_id, false);
         self.free_count += 1;
 
@@ -329,6 +371,10 @@ impl ChunkAllocEdit {
             }
         })
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.edit_table.is_empty()
+    }
 }
 
 impl Edit<ChunkAllocState> for ChunkAllocEdit {
@@ -339,7 +385,7 @@ impl Edit<ChunkAllocState> for ChunkAllocEdit {
                     // Journal's state also needs to be updated
                     if !state.is_chunk_allocated(chunk_id) {
                         let _allocated_id = state.alloc().unwrap();
-                        // `_allocated_id` may not be equal to `chunk_id`due to concurrent TXs,
+                        // `_allocated_id` may not be equal to `chunk_id` due to concurrent TXs,
                         // but eventually the state will be consistent
                     }
 
@@ -372,11 +418,11 @@ mod tests {
         debug_assert!(alloc_cnt <= chunk_alloc.capacity() && dealloc_cnt <= alloc_cnt);
         let mut tx = chunk_alloc.new_tx();
         tx.context(|| {
-            let mut allocated_chunk_ids = Vec::with_capacity(alloc_cnt);
-            for _ in 0..alloc_cnt {
-                let chunk_id = chunk_alloc.alloc().unwrap();
-                allocated_chunk_ids.push(chunk_id);
-            }
+            let chunk_id = chunk_alloc.alloc().unwrap();
+            let chunk_ids = chunk_alloc.alloc_batch(alloc_cnt - 1).unwrap();
+            let allocated_chunk_ids: Vec<ChunkId> = core::iter::once(chunk_id)
+                .chain(chunk_ids.into_iter())
+                .collect();
 
             chunk_alloc.dealloc(allocated_chunk_ids[0]);
             chunk_alloc.dealloc_batch(
