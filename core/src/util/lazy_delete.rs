@@ -1,6 +1,6 @@
 use core::fmt;
 use core::ops::{Deref, DerefMut};
-use core::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::prelude::*;
 
@@ -67,12 +67,12 @@ impl<T> LazyDelete<T> {
 
     /// Mark this instance deleted.
     pub fn delete(this: &Self) {
-        this.is_deleted.store(true, Relaxed);
+        this.is_deleted.store(true, Ordering::Release);
     }
 
     /// Returns whether this instance has been marked deleted.
     pub fn is_deleted(this: &Self) -> bool {
-        this.is_deleted.load(Relaxed)
+        this.is_deleted.load(Ordering::Acquire)
     }
 }
 

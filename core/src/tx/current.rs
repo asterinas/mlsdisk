@@ -107,7 +107,7 @@ where
     F: FnOnce() -> R,
 {
     let tid = CurrentThread::id();
-    let mut provider = tx.provider();
+    let provider = tx.provider();
     let old = provider.tx_table.lock().insert(tid, tx as *mut Tx);
     assert_eq!(
         old, None,
