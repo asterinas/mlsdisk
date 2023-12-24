@@ -3,26 +3,25 @@ name = "sworndisk-v2"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 bindings = { path = "../linux/bindings", optional = true }
 inherit-methods-macro = {git = "https://github.com/asterinas/inherit-methods-macro", rev = "98f7e3e"}
 pod = {git = "https://github.com/asterinas/pod", rev = "7fa2ed2"}
 
-array-init = "2.1.0"
-bittle = "0.5.6"
-lending-iterator = "=0.1.7"
-lru = "=0.8.1"
-postcard = "=1.0.6"
-static_assertions = "1.1.0"
 ahash = { version = "=0.7.7", default-features = false }
 anymap = { version = "=1.0.0-beta.2", default-features = false, features = ["hashbrown"] }
+array-init = "2.1.0"
+bittle = "0.5.6"
+crossbeam-queue = { version = "=0.3.11", default-features = false, features = ["alloc"] }
 hashbrown = { version = "=0.12.3", features = ["serde"] }
+lending-iterator = "=0.1.7"
 log = { version = "0.4", optional =  true }
+lru = "=0.8.1"
 openssl = { version = "0.10.55", optional = true }
+postcard = "=1.0.6"
 serde = { version = "=1.0.188", default-features = false, features = ["alloc", "derive"] }
 spin = { version = "0.9.8", optional = true }
+static_assertions = "1.1.0"
 
 [lib]
 doctest = false

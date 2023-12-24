@@ -9,7 +9,7 @@ mod current;
 
 use anymap::hashbrown::AnyMap;
 use core::any::Any;
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::os::{HashMap, Mutex, RwLock, Tid};
 use crate::prelude::*;
@@ -32,7 +32,7 @@ impl TxProvider {
     pub fn new() -> Arc<Self> {
         static NEXT_ID: AtomicU64 = AtomicU64::new(0);
         Arc::new_cyclic(|weak_self| Self {
-            id: NEXT_ID.fetch_add(1, Relaxed),
+            id: NEXT_ID.fetch_add(1, Ordering::Release),
             initializer_map: RwLock::new(AnyMap::new()),
             precommit_handlers: RwLock::new(Vec::new()),
             commit_handlers: RwLock::new(Vec::new()),
@@ -165,7 +165,7 @@ impl Tx {
         static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
         Self {
-            id: NEXT_ID.fetch_add(1, Relaxed),
+            id: NEXT_ID.fetch_add(1, Ordering::Release),
             provider,
             data_map: AnyMap::new(),
             status: TxStatus::Ongoing,
@@ -296,7 +296,6 @@ unsafe impl Sync for TxProvider {}
 mod tests {
     use super::*;
     use alloc::collections::BTreeSet;
-    use spin::Mutex;
 
     /// `Db<T>` is a toy implementation of in-memory database for
     /// a set of items of type `T`.

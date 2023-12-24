@@ -1,13 +1,11 @@
 use super::{Iv, Key, Mac};
 use crate::layers::bio::{BlockId, BlockLog, Buf, BufMut, BufRef, BLOCK_SIZE};
-use crate::os::{Aead, RwLock};
+use crate::os::{Aead, HashMap, RwLock};
 use crate::prelude::*;
 
 use core::any::Any;
 use core::cell::RefCell;
-use core::fmt::{self, Debug};
 use core::mem::size_of;
-use hashbrown::HashMap;
 use pod::Pod;
 use serde::{Deserialize, Serialize};
 use static_assertions::const_assert;
@@ -100,7 +98,7 @@ struct MhtStorage<L> {
 }
 
 /// The metadata of the root MHT node of a `CryptoLog`.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RootMhtMeta {
     pub pos: Pbid,
     pub mac: Mac,
@@ -289,7 +287,7 @@ impl<L: BlockLog> CryptoLog<L> {
 
 impl<L: BlockLog> Mht<L> {
     // Buffer capacity for appended data nodes.
-    const APPEND_BUF_CAPACITY: usize = 1024;
+    const APPEND_BUF_CAPACITY: usize = 2048;
 
     pub fn new(block_log: L, root_key: Key, node_cache: Arc<dyn NodeCache>) -> Self {
         let storage = Arc::new(MhtStorage::new(block_log, node_cache));
@@ -427,7 +425,9 @@ impl<L: BlockLog> Mht<L> {
     pub fn flush(&mut self) -> Result<()> {
         let data_node_entries = self.data_buf.flush()?;
         self.do_build(data_node_entries)?;
-        self.storage.flush()
+        // FIXME: Should we sync the storage here?
+        // self.storage.flush()?;
+        Ok(())
     }
 
     fn do_build(&mut self, data_node_entries: Vec<MhtNodeEntry>) -> Result<()> {
@@ -505,6 +505,10 @@ impl<L: BlockLog> MhtStorage<L> {
     fn append_data_nodes(&self, nodes: &[Arc<DataNode>]) -> Result<Vec<MhtNodeEntry>> {
         let num_append = nodes.len();
         let mut node_entries = Vec::with_capacity(num_append);
+        if num_append == 0 {
+            return Ok(node_entries);
+        }
+
         let mut cipher_buf = Buf::alloc(num_append)?;
         let mut pos = self.block_log.nblocks() as BlockId;
         let start_pos = pos;
@@ -735,7 +739,7 @@ impl LevelBuilder {
     }
 
     // Building last MHT node of the level can be complicated, since
-    // the last node may be incompelte
+    // the last node may be incomplete
     fn build_last_node(&self, entries: &[&MhtNodeEntry]) -> Arc<MhtNode> {
         let num_data_nodes = {
             let max_data_nodes = MhtNode::max_num_data_nodes(self.height);
@@ -814,7 +818,7 @@ impl<'a, L: BlockLog> PreviousBuild<'a, L> {
 
             // Incomplete nodes only appear in the last node of each level
             lookup_node = {
-                let entry = lookup_node.entries[lookup_node.num_valid_entries()];
+                let entry = lookup_node.entries[lookup_node.num_valid_entries() - 1];
                 self.storage
                     .read_mht_node(entry.pos, &entry.key, &entry.mac, &Iv::new_zeroed())
                     .unwrap()
@@ -860,8 +864,8 @@ struct AppendDataBuf<L> {
 }
 
 impl<L: BlockLog> AppendDataBuf<L> {
-    // Maximum capacity of entries indicates a complete MHT (height equals 2)
-    const MAX_ENTRY_QUEUE_CAP: usize = MHT_NBRANCHES * MHT_NBRANCHES;
+    // Maximum capacity of entries indicates a complete MHT (height equals 3)
+    const MAX_ENTRY_QUEUE_CAP: usize = MHT_NBRANCHES.pow(3);
 
     pub fn new(capacity: usize, start_pos: Lbid, storage: Arc<MhtStorage<L>>) -> Self {
         let (node_queue_cap, entry_queue_cap) = Self::calc_queue_cap(capacity, start_pos);
@@ -964,7 +968,6 @@ impl<L: BlockLog> AppendDataBuf<L> {
     }
 
     fn calc_queue_cap(capacity: usize, append_pos: Lbid) -> (usize, usize) {
-        debug_assert!(Self::MAX_ENTRY_QUEUE_CAP >= capacity);
         // Half for data nodes, half for data node entries
         let node_queue_cap = capacity * 1 / 2;
         let entry_queue_cap = {
@@ -990,6 +993,7 @@ impl<L: BlockLog> Debug for Mht<L> {
             .field("root_meta", &self.root_meta())
             .field("root_node", &self.root_node())
             .field("root_key", &self.root_key)
+            .field("total_data_nodes", &self.total_data_nodes())
             .field("buffered_data_nodes", &self.data_buf.num_append())
             .finish()
     }

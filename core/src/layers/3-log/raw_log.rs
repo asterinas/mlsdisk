@@ -93,6 +93,7 @@ use crate::util::LazyDelete;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use serde::{Deserialize, Serialize};
 
+/// The ID of a raw log.
 pub type RawLogId = u64;
 
 /// A store of raw logs.
@@ -105,7 +106,8 @@ pub struct RawLogStore<D> {
 }
 
 impl<D: BlockSet> RawLogStore<D> {
-    /// Creates a new store of raw logs given a chunk allocator and an untrusted disk.
+    /// Creates a new store of raw logs,
+    /// given a chunk allocator and an untrusted disk.
     pub fn new(disk: D, tx_provider: Arc<TxProvider>, chunk_alloc: ChunkAlloc) -> Arc<Self> {
         Self::from_parts(RawLogStoreState::new(), disk, chunk_alloc, tx_provider)
     }
@@ -145,35 +147,26 @@ impl<D: BlockSet> RawLogStore<D> {
         new_self.tx_provider.register_commit_handler({
             let state = new_self.state.clone();
             let chunk_alloc = new_self.chunk_alloc.clone();
-
             move |current: CurrentTx<'_>| {
-                Self::do_lazy_deletion(&state, &current);
-
                 current.data_with(|edit: &RawLogStoreEdit| {
+                    if edit.edit_table.is_empty() {
+                        return;
+                    }
+
                     let mut state = state.lock();
                     state.apply(&edit);
 
-                    // Add lazy delete for newly created logs
-                    for log_id in edit.iter_created_logs() {
-                        let log_entry_opt = state.persistent.find_log(log_id);
-                        if log_entry_opt.is_none() || state.lazy_deletes.contains_key(&log_id) {
-                            continue;
-                        }
-
-                        Self::add_lazy_delete(
-                            log_id,
-                            log_entry_opt.as_ref().unwrap(),
-                            &chunk_alloc,
-                            &mut state.lazy_deletes,
-                        );
-                    }
+                    Self::add_lazy_deletes_for_created_logs(&mut state, edit, &chunk_alloc);
                 });
+                let mut state = state.lock();
+                Self::do_lazy_deletion(&mut state, &current);
             }
         });
 
         new_self
     }
 
+    // Adds a lazy delete for the given log.
     fn add_lazy_delete(
         log_id: RawLogId,
         log_entry: &RawLogEntry,
@@ -190,12 +183,33 @@ impl<D: BlockSet> RawLogStore<D> {
         );
     }
 
-    fn do_lazy_deletion(state: &Arc<Mutex<State>>, current_tx: &CurrentTx) {
+    fn add_lazy_deletes_for_created_logs(
+        state: &mut State,
+        edit: &RawLogStoreEdit,
+        chunk_alloc: &ChunkAlloc,
+    ) {
+        for log_id in edit.iter_created_logs() {
+            let log_entry_opt = state.persistent.find_log(log_id);
+            if log_entry_opt.is_none() || state.lazy_deletes.contains_key(&log_id) {
+                continue;
+            }
+
+            Self::add_lazy_delete(
+                log_id,
+                log_entry_opt.as_ref().unwrap(),
+                chunk_alloc,
+                &mut state.lazy_deletes,
+            )
+        }
+    }
+
+    // Do lazy deletions for the deleted logs in the current TX.
+    fn do_lazy_deletion(state: &mut State, current_tx: &CurrentTx) {
         let deleted_logs = current_tx
             .data_with(|edit: &RawLogStoreEdit| edit.iter_deleted_logs().collect::<Vec<_>>());
 
         for log_id in deleted_logs {
-            let Some(lazy_delete) = state.lock().lazy_deletes.remove(&log_id) else {
+            let Some(lazy_delete) = state.lazy_deletes.remove(&log_id) else {
                 // Other concurrent TXs have deleted the same log
                 continue;
             };
@@ -203,11 +217,17 @@ impl<D: BlockSet> RawLogStore<D> {
         }
     }
 
+    /// Creates a new transaction for `RawLogStore`.
     pub fn new_tx(&self) -> Tx {
         self.tx_provider.new_tx()
     }
 
-    /// Creates a new raw log with a new log id.
+    /// Syncs all the data managed by `RawLogStore` for persistence.
+    pub fn sync(&self) -> Result<()> {
+        self.disk.flush()
+    }
+
+    /// Creates a new raw log with a new log ID.
     ///
     /// # Panics
     ///
@@ -246,15 +266,18 @@ impl<D: BlockSet> RawLogStore<D> {
     pub fn open_log(&self, log_id: u64, can_append: bool) -> Result<RawLog<D>> {
         let mut state = self.state.lock();
         // Must check lazy deletes first in case there is concurrent deletion
-        let lazy_delete = state.lazy_deletes.get(&log_id).ok_or(NotFound)?.clone();
+        let lazy_delete = state
+            .lazy_deletes
+            .get(&log_id)
+            .ok_or(Error::with_msg(NotFound, "raw log already been deleted"))?
+            .clone();
         let mut current_tx = self.tx_provider.current();
 
         let log_entry_opt = state.persistent.find_log(log_id);
         // The log is already created by other TX
-        if log_entry_opt.is_some() {
-            let log_entry = log_entry_opt.as_ref().unwrap();
+        if let Some(log_entry) = log_entry_opt.as_ref() {
             if can_append {
-                // Prevent other TX from opening this log in the append mode.
+                // Prevent other TX from opening this log in the append mode
                 state.add_to_write_set(log_id)?;
 
                 // If the log is open in the append mode, edit must be prepared
@@ -294,11 +317,11 @@ impl<D: BlockSet> RawLogStore<D> {
     /// This method must be called within a TX. Otherwise, this method panics.
     pub fn delete_log(&self, log_id: RawLogId) -> Result<()> {
         let mut current_tx = self.tx_provider.current();
+
         // Free tail chunks
         let tail_chunks =
             current_tx.data_mut_with(|edit: &mut RawLogStoreEdit| edit.delete_log(log_id));
         tail_chunks.map(|chunks| self.chunk_alloc.dealloc_batch(chunks.iter().cloned()));
-
         // Leave freeing head chunks to lazy delete
 
         self.state.lock().remove_from_write_set(log_id);
@@ -306,7 +329,26 @@ impl<D: BlockSet> RawLogStore<D> {
     }
 }
 
-/// A raw(untrusted) log.
+impl<D> Debug for RawLogStore<D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state = self.state.lock();
+        f.debug_struct("RawLogStore")
+            .field("persistent_log_table", &state.persistent.log_table)
+            .field(
+                "persistent_next_free_log_id",
+                &state.persistent.next_free_log_id,
+            )
+            .field("write_set", &state.write_set)
+            .field("chunk_alloc", &self.chunk_alloc)
+            .finish()
+    }
+}
+
+// SAFETY: `RawLogStore` is concurrency-safe.
+unsafe impl<D> Send for RawLogStore<D> {}
+unsafe impl<D> Sync for RawLogStore<D> {}
+
+/// A raw (untrusted) log.
 pub struct RawLog<D> {
     log_id: RawLogId,
     log_entry: Option<Arc<Mutex<RawLogEntry>>>,
@@ -317,22 +359,27 @@ pub struct RawLog<D> {
     can_append: bool,
 }
 
+/// A reference (handle) to a raw log.
 struct RawLogRef<'a, D> {
     log_store: &'a RawLogStore<D>,
     log_head: Option<RawLogHeadRef<'a>>,
     log_tail: Option<RawLogTailRef<'a>>,
 }
 
+/// A head reference (handle) to a raw log.
 struct RawLogHeadRef<'a> {
     entry: MutexGuard<'a, RawLogEntry>,
 }
 
+/// A tail reference (handle) to a raw log.
 struct RawLogTailRef<'a> {
     log_id: RawLogId,
     current: CurrentTx<'a>,
 }
 
 impl<D: BlockSet> BlockLog for RawLog<D> {
+    /// Reads one or multiple blocks at a specified position.
+    ///
     /// # Panics
     ///
     /// This method must be called within a TX. Otherwise, this method panics.
@@ -341,7 +388,7 @@ impl<D: BlockSet> BlockLog for RawLog<D> {
         log_ref.read(pos, buf)
     }
 
-    /// # Panics
+    /// Appends one or multiple blocks at the end.
     ///
     /// This method must be called within a TX. Otherwise, this method panics.
     fn append(&self, buf: BufRef) -> Result<BlockId> {
@@ -349,18 +396,23 @@ impl<D: BlockSet> BlockLog for RawLog<D> {
             return_errno_with_msg!(PermissionDenied, "raw log not in append mode");
         }
 
-        let nblocks = buf.nblocks();
         let mut log_ref = self.as_ref();
         log_ref.append(buf)?;
 
+        let nblocks = buf.nblocks();
         let pos = self.append_pos.fetch_add(nblocks, Ordering::Release);
         Ok(pos)
     }
 
+    /// Ensures that blocks are persisted to the disk.
     fn flush(&self) -> Result<()> {
-        self.log_store.disk.flush()
+        // FIXME: Should we sync the disk here?
+        self.log_store.disk.flush()?;
+        Ok(())
     }
 
+    /// Returns the number of blocks.
+    ///
     /// # Panics
     ///
     /// This method must be called within a TX. Otherwise, this method panics.
@@ -419,13 +471,32 @@ impl<D> RawLog<D> {
 impl<D> Drop for RawLog<D> {
     fn drop(&mut self) {
         if self.can_append {
-            let mut state = self.log_store.state.lock();
-            state.remove_from_write_set(self.log_id);
+            self.log_store
+                .state
+                .lock()
+                .remove_from_write_set(self.log_id);
         }
     }
 }
 
+impl<D> Debug for RawLog<D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RawLog")
+            .field("log_id", &self.log_id)
+            .field("log_entry", &self.log_entry)
+            .field("append_pos", &self.append_pos)
+            .field("can_append", &self.can_append)
+            .finish()
+    }
+}
+
 impl<'a, D: BlockSet> RawLogRef<'a, D> {
+    /// Reads one or multiple blocks at a specified position of the log.
+    /// First head then tail if necessary.
+    ///
+    /// # Panics
+    ///
+    /// This method must be called within a TX. Otherwise, this method panics.
     pub fn read(&self, mut pos: BlockId, mut buf: BufMut) -> Result<()> {
         let mut nblocks = buf.nblocks();
         let mut buf_slice = buf.as_mut_slice();
@@ -453,6 +524,9 @@ impl<'a, D: BlockSet> RawLogRef<'a, D> {
             nblocks -= num_read;
             buf_slice = &mut buf_slice[num_read * BLOCK_SIZE..];
         }
+        if nblocks == 0 {
+            return Ok(());
+        }
 
         // Read from the tail if possible and necessary
         let tail_opt = &self.log_tail;
@@ -467,6 +541,11 @@ impl<'a, D: BlockSet> RawLogRef<'a, D> {
         Ok(())
     }
 
+    /// Appends one or multiple blocks at the end (to the tail).
+    ///
+    /// # Panics
+    ///
+    /// This method must be called within a TX. Otherwise, this method panics.
     pub fn append(&mut self, buf: BufRef) -> Result<()> {
         let append_nblocks = buf.nblocks();
         let log_tail = self
@@ -475,22 +554,25 @@ impl<'a, D: BlockSet> RawLogRef<'a, D> {
             .expect("raw log must be opened in append mode");
 
         // Allocate new chunks if necessary
-        let new_chunks = {
+        let new_chunks_opt = {
             let chunks_needed = log_tail.calc_needed_chunks(append_nblocks);
-            let mut chunk_ids = Vec::with_capacity(chunks_needed);
-            for _ in 0..chunks_needed {
-                let new_chunk_id = self
+            if chunks_needed > 0 {
+                let chunk_ids = self
                     .log_store
                     .chunk_alloc
-                    .alloc()
+                    .alloc_batch(chunks_needed)
                     .ok_or(Error::with_msg(OutOfMemory, "chunk allocation failed"))?;
-                chunk_ids.push(new_chunk_id);
+                Some(chunk_ids)
+            } else {
+                None
             }
-            chunk_ids
         };
-        log_tail.tail_mut_with(|tail: &mut RawLogTail| {
-            tail.chunks.extend(new_chunks);
-        });
+
+        if let Some(new_chunks) = new_chunks_opt {
+            log_tail.tail_mut_with(|tail: &mut RawLogTail| {
+                tail.chunks.extend(new_chunks);
+            });
+        }
 
         log_tail.append(buf, &self.log_store.disk)?;
 
@@ -501,6 +583,11 @@ impl<'a, D: BlockSet> RawLogRef<'a, D> {
         Ok(())
     }
 
+    /// Returns the number of blocks.
+    ///
+    /// # Panics
+    ///
+    /// This method must be called within a TX. Otherwise, this method panics.
     pub fn nblocks(&self) -> usize {
         self.head_len() + self.tail_len()
     }
@@ -540,27 +627,25 @@ impl<'a> RawLogHeadRef<'a> {
         Ok(())
     }
 
-    /// Collect and prepare a set of blocks in head for read
-    pub fn prepare_blocks(&self, offset: BlockId, nblocks: usize) -> Vec<BlockId> {
-        let chunks = &self.entry.head.chunks;
+    /// Collect and prepare a set of consecutive blocks in head for a read request.
+    pub fn prepare_blocks(&self, mut offset: BlockId, nblocks: usize) -> Vec<BlockId> {
         let mut res_blocks = Vec::with_capacity(nblocks);
+        let chunks = &self.entry.head.chunks;
 
-        let mut curr_chunk_idx = offset / CHUNK_NBLOCKS;
-        let mut curr_chunk_inner_offset = offset % CHUNK_NBLOCKS;
         while res_blocks.len() != nblocks {
+            let curr_chunk_idx = offset / CHUNK_NBLOCKS;
+            let curr_chunk_inner_offset = offset % CHUNK_NBLOCKS;
+
             res_blocks.push(chunks[curr_chunk_idx] * CHUNK_NBLOCKS + curr_chunk_inner_offset);
-            curr_chunk_inner_offset += 1;
-            if curr_chunk_inner_offset == CHUNK_NBLOCKS {
-                curr_chunk_inner_offset = 0;
-                curr_chunk_idx += 1;
-            }
+            offset += 1;
         }
+
         res_blocks
     }
 }
 
 impl<'a> RawLogTailRef<'a> {
-    /// Apply given function to the immutable tail
+    /// Apply given function to the immutable tail.
     pub fn tail_with<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&RawLogTail) -> R,
@@ -575,7 +660,7 @@ impl<'a> RawLogTailRef<'a> {
         })
     }
 
-    /// Apply given function to the mutable tail
+    /// Apply given function to the mutable tail.
     pub fn tail_mut_with<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&mut RawLogTail) -> R,
@@ -650,53 +735,43 @@ impl<'a> RawLogTailRef<'a> {
         })
     }
 
-    /// Collect and prepare a set of blocks in tail for read/append
-    fn prepare_blocks(&self, offset: BlockId, nblocks: usize) -> Vec<BlockId> {
+    /// Collect and prepare a set of consecutive blocks in tail for a read/append request.
+    fn prepare_blocks(&self, mut offset: BlockId, nblocks: usize) -> Vec<BlockId> {
         self.tail_with(|tail: &RawLogTail| {
             let mut res_blocks = Vec::with_capacity(nblocks);
-            let mut step = 0;
-            if offset < tail.head_last_chunk_free_blocks as _ {
-                for i in 0..tail.head_last_chunk_free_blocks {
-                    // Collect available blocks from the last chunk of the head first if necessary
+            let head_last_chunk_free_blocks = tail.head_last_chunk_free_blocks as usize;
+
+            // Collect available blocks from the last chunk of the head first if necessary
+            if offset < head_last_chunk_free_blocks as _ {
+                for i in offset..head_last_chunk_free_blocks {
+                    let avail_chunk = tail.head_last_chunk_id * CHUNK_NBLOCKS
+                        + (CHUNK_NBLOCKS - head_last_chunk_free_blocks as usize + i as usize);
+                    res_blocks.push(avail_chunk);
+
                     if res_blocks.len() == nblocks {
-                        debug_assert_eq!(step, offset + nblocks);
                         return res_blocks;
                     }
-                    if step >= offset && step - offset < tail.head_last_chunk_free_blocks as _ {
-                        let avail_chunk = tail.head_last_chunk_id * CHUNK_NBLOCKS
-                            + (CHUNK_NBLOCKS - tail.head_last_chunk_free_blocks as usize
-                                + i as usize);
-                        res_blocks.push(avail_chunk);
-                    }
-                    step += 1;
                 }
+
+                offset = 0;
+            } else {
+                offset -= head_last_chunk_free_blocks;
             }
 
             // Collect available blocks from the tail first if necessary
-            let mut curr_chunk_idx = 0;
-            let mut curr_chunk_inner_offset = 0;
             let chunks = &tail.chunks;
             while res_blocks.len() != nblocks {
-                if step >= offset {
-                    res_blocks
-                        .push(chunks[curr_chunk_idx] * CHUNK_NBLOCKS + curr_chunk_inner_offset);
-                }
-                step += 1;
-                curr_chunk_inner_offset += 1;
-                if curr_chunk_inner_offset == CHUNK_NBLOCKS {
-                    curr_chunk_inner_offset = 0;
-                    curr_chunk_idx += 1;
-                }
+                let curr_chunk_idx = offset / CHUNK_NBLOCKS;
+                let curr_chunk_inner_offset = offset % CHUNK_NBLOCKS;
+
+                res_blocks.push(chunks[curr_chunk_idx] * CHUNK_NBLOCKS + curr_chunk_inner_offset);
+                offset += 1;
             }
 
-            debug_assert_eq!(step, offset + nblocks);
             res_blocks
         })
     }
 }
-
-unsafe impl<D> Send for RawLogStore<D> {}
-unsafe impl<D> Sync for RawLogStore<D> {}
 
 ////////////////////////////////////////////////////////////////////////////////
 // Persistent State
@@ -777,16 +852,16 @@ impl RawLogStoreState {
         new_log_id
     }
 
-    pub(super) fn find_log(&self, log_id: u64) -> Option<RawLogEntry> {
-        self.log_table.get(&log_id).cloned()
-    }
-
     pub fn create_log(&mut self, new_log_id: u64) {
         let new_log_entry = RawLogEntry {
             head: RawLogHead::new(),
         };
         let already_exists = self.log_table.insert(new_log_id, new_log_entry).is_some();
         debug_assert_eq!(already_exists, false);
+    }
+
+    pub(super) fn find_log(&self, log_id: u64) -> Option<RawLogEntry> {
+        self.log_table.get(&log_id).cloned()
     }
 
     pub(super) fn append_log(&mut self, log_id: u64, tail: &RawLogTail) {
@@ -821,13 +896,13 @@ impl RawLogHead {
 ////////////////////////////////////////////////////////////////////////////////
 
 /// A persistent edit to the state of `RawLogStore`.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RawLogStoreEdit {
     edit_table: HashMap<RawLogId, RawLogEdit>,
 }
 
 /// The basic unit of a persistent edit to the state of `RawLogStore`.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) enum RawLogEdit {
     Create(RawLogCreate),
     Append(RawLogAppend),
@@ -835,19 +910,19 @@ pub(super) enum RawLogEdit {
 }
 
 /// An edit that implies a log being created.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct RawLogCreate {
     tail: RawLogTail,
 }
 
 /// An edit that implies an existing log being appended.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct RawLogAppend {
     tail: RawLogTail,
 }
 
 /// A log tail contains chunk metadata of a log's TX-ongoing data.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct RawLogTail {
     // The last chunk of the head. If it is partially filled
     // (head_last_chunk_free_blocks > 0), then the tail should write to the
@@ -887,13 +962,13 @@ impl RawLogStoreEdit {
                 debug_assert!(edit_exists.is_none());
             }
             Some(edit) => {
-                // If edit == create, unreachable: there can't be a persistent log entry
+                // If `edit == create`, unreachable: there can't be a persistent log entry
                 // when the log is just created in an ongoing TX
                 if let RawLogEdit::Create(_) = edit {
                     unreachable!();
                 }
-                // If edit == append, do nothing
-                // If edit == delete, panic
+                // If `edit == append`, do nothing
+                // If `edit == delete`, panic
                 if let RawLogEdit::Delete = edit {
                     panic!("try to open a deleted log!");
                 }
@@ -948,6 +1023,10 @@ impl RawLogStoreEdit {
                 }
             })
             .map(|(id, _)| *id)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.edit_table.is_empty()
     }
 }
 
@@ -1071,13 +1150,10 @@ mod tests {
         let res: Result<_> = tx.context(|| {
             let log = raw_log_store.open_log(log_id, true)?;
 
-            let mut buf = Buf::alloc(CHUNK_NBLOCKS)?;
-            log.read(1, buf.as_mut())?;
+            let mut buf = Buf::alloc(4)?;
+            log.read(1 as BlockId, buf.as_mut())?;
             assert_eq!(&buf.as_slice()[..3 * BLOCK_SIZE], &[2u8; 3 * BLOCK_SIZE]);
-            assert_eq!(
-                &buf.as_slice()[3 * BLOCK_SIZE..CHUNK_SIZE],
-                &[5u8; 1021 * BLOCK_SIZE]
-            );
+            assert_eq!(&buf.as_slice()[3 * BLOCK_SIZE..], &[5u8; BLOCK_SIZE]);
 
             Ok(())
         });
