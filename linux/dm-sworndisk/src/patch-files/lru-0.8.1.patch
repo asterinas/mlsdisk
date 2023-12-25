@@ -1,0 +1,54 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index 2d39b74..505797d 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -57,6 +57,8 @@
+ //! }
+ //! ```
+ 
++#![feature(allocator_api)]
++
+ #![no_std]
+ #![cfg_attr(feature = "nightly", feature(negative_impls, auto_traits))]
+ 
+@@ -66,7 +68,7 @@ extern crate hashbrown;
+ #[cfg(test)]
+ extern crate scoped_threadpool;
+ 
+-use alloc::borrow::Borrow;
++use core::borrow::Borrow;
+ use alloc::boxed::Box;
+ use core::fmt;
+ use core::hash::{BuildHasher, Hash, Hasher};
+@@ -133,9 +135,9 @@ impl<K> Borrow<K> for KeyRef<K> {
+ }
+ 
+ #[cfg(not(feature = "nightly"))]
+-impl Borrow<str> for KeyRef<alloc::string::String> {
++impl Borrow<str> for KeyRef<kernel::str::CString> {
+     fn borrow(&self) -> &str {
+-        unsafe { &*self.k }
++        unsafe { (*self.k).as_str_unchecked() }
+     }
+ }
+ 
+@@ -273,8 +275,8 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
+         let cache = LruCache {
+             map,
+             cap,
+-            head: Box::into_raw(Box::new(LruEntry::new_sigil())),
+-            tail: Box::into_raw(Box::new(LruEntry::new_sigil())),
++            head: Box::into_raw(Box::try_new(LruEntry::new_sigil()).unwrap()),
++            tail: Box::into_raw(Box::try_new(LruEntry::new_sigil()).unwrap()),
+         };
+ 
+         unsafe {
+@@ -388,7 +390,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
+             (Some(replaced), old_node)
+         } else {
+             // if the cache is not full allocate a new LruEntry
+-            (None, Box::new(LruEntry::new(k, v)))
++            (None, Box::try_new(LruEntry::new(k, v)).unwrap())
+         }
+     }
+ 

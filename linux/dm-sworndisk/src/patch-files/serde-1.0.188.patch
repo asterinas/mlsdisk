@@ -1,0 +1,196 @@
+diff --git a/src/de/ignored_any.rs b/src/de/ignored_any.rs
+index 2360a174..b442266a 100644
+--- a/src/de/ignored_any.rs
++++ b/src/de/ignored_any.rs
+@@ -147,6 +147,7 @@ impl<'de> Visitor<'de> for IgnoredAny {
+         Ok(IgnoredAny)
+     }
+ 
++    #[cfg(not(no_fp_fmt_parse))]
+     #[inline]
+     fn visit_f64<E>(self, x: f64) -> Result<Self::Value, E> {
+         let _ = x;
+diff --git a/src/de/impls.rs b/src/de/impls.rs
+index fbee1554..b3843522 100644
+--- a/src/de/impls.rs
++++ b/src/de/impls.rs
+@@ -348,6 +348,7 @@ impl_deserialize_num! {
+     uint_to_self!(u32:visit_u32 u64:visit_u64);
+ }
+ 
++#[cfg(not(no_fp_fmt_parse))]
+ impl_deserialize_num! {
+     f32, deserialize_f32
+     num_self!(f32:visit_f32);
+@@ -356,6 +357,7 @@ impl_deserialize_num! {
+     num_as_self!(u8:visit_u8 u16:visit_u16 u32:visit_u32 u64:visit_u64);
+ }
+ 
++#[cfg(not(no_fp_fmt_parse))]
+ impl_deserialize_num! {
+     f64, deserialize_f64
+     num_self!(f64:visit_f64);
+diff --git a/src/de/mod.rs b/src/de/mod.rs
+index afbc23af..d0cc5f32 100644
+--- a/src/de/mod.rs
++++ b/src/de/mod.rs
+@@ -346,6 +346,7 @@ pub enum Unexpected<'a> {
+ 
+     /// The input contained a floating point `f32` or `f64` that was not
+     /// expected.
++    #[cfg(not(no_fp_fmt_parse))]
+     Float(f64),
+ 
+     /// The input contained a `char` that was not expected.
+@@ -402,6 +403,7 @@ impl<'a> fmt::Display for Unexpected<'a> {
+             Bool(b) => write!(formatter, "boolean `{}`", b),
+             Unsigned(i) => write!(formatter, "integer `{}`", i),
+             Signed(i) => write!(formatter, "integer `{}`", i),
++            #[cfg(not(no_fp_fmt_parse))]
+             Float(f) => write!(formatter, "floating point `{}`", f),
+             Char(c) => write!(formatter, "character `{}`", c),
+             Str(s) => write!(formatter, "string {:?}", s),
+@@ -993,12 +995,20 @@ pub trait Deserializer<'de>: Sized {
+     /// Hint that the `Deserialize` type is expecting a `f32` value.
+     fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+     where
+-        V: Visitor<'de>;
++        V: Visitor<'de>
++    {
++        let _ = visitor;
++        Err(Error::custom("f32 is not supported"))
++    }
+ 
+     /// Hint that the `Deserialize` type is expecting a `f64` value.
+     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+     where
+-        V: Visitor<'de>;
++        V: Visitor<'de>
++    {
++        let _ = visitor;
++        Err(Error::custom("f64 is not supported"))
++    }
+ 
+     /// Hint that the `Deserialize` type is expecting a `char` value.
+     fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+@@ -1442,6 +1452,7 @@ pub trait Visitor<'de>: Sized {
+     /// The default implementation forwards to [`visit_f64`].
+     ///
+     /// [`visit_f64`]: #method.visit_f64
++    #[cfg(not(no_fp_fmt_parse))]
+     fn visit_f32<E>(self, v: f32) -> Result<Self::Value, E>
+     where
+         E: Error,
+@@ -1452,6 +1463,7 @@ pub trait Visitor<'de>: Sized {
+     /// The input contains an `f64`.
+     ///
+     /// The default implementation fails with a type error.
++    #[cfg(not(no_fp_fmt_parse))]
+     fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
+     where
+         E: Error,
+diff --git a/src/de/value.rs b/src/de/value.rs
+index 1234b810..e5edd625 100644
+--- a/src/de/value.rs
++++ b/src/de/value.rs
+@@ -299,7 +299,9 @@ primitive_deserializer!(u16, "a `u16`.", U16Deserializer, visit_u16);
+ primitive_deserializer!(u64, "a `u64`.", U64Deserializer, visit_u64);
+ primitive_deserializer!(u128, "a `u128`.", U128Deserializer, visit_u128);
+ primitive_deserializer!(usize, "a `usize`.", UsizeDeserializer, visit_u64 as u64);
++#[cfg(not(no_fp_fmt_parse))]
+ primitive_deserializer!(f32, "an `f32`.", F32Deserializer, visit_f32);
++#[cfg(not(no_fp_fmt_parse))]
+ primitive_deserializer!(f64, "an `f64`.", F64Deserializer, visit_f64);
+ primitive_deserializer!(char, "a `char`.", CharDeserializer, visit_char);
+ 
+diff --git a/src/private/ser.rs b/src/private/ser.rs
+index 50bcb251..7ff92cd0 100644
+--- a/src/private/ser.rs
++++ b/src/private/ser.rs
+@@ -46,6 +46,7 @@ struct TaggedSerializer<S> {
+ enum Unsupported {
+     Boolean,
+     Integer,
++    #[cfg(not(no_fp_fmt_parse))]
+     Float,
+     Char,
+     String,
+@@ -64,6 +65,7 @@ impl Display for Unsupported {
+         match *self {
+             Unsupported::Boolean => formatter.write_str("a boolean"),
+             Unsupported::Integer => formatter.write_str("an integer"),
++            #[cfg(not(no_fp_fmt_parse))]
+             Unsupported::Float => formatter.write_str("a float"),
+             Unsupported::Char => formatter.write_str("a char"),
+             Unsupported::String => formatter.write_str("a string"),
+@@ -150,10 +152,12 @@ where
+         Err(self.bad_type(Unsupported::Integer))
+     }
+ 
++    #[cfg(not(no_fp_fmt_parse))]
+     fn serialize_f32(self, _: f32) -> Result<Self::Ok, Self::Error> {
+         Err(self.bad_type(Unsupported::Float))
+     }
+ 
++    #[cfg(not(no_fp_fmt_parse))]
+     fn serialize_f64(self, _: f64) -> Result<Self::Ok, Self::Error> {
+         Err(self.bad_type(Unsupported::Float))
+     }
+diff --git a/src/ser/fmt.rs b/src/ser/fmt.rs
+index 0650ab6f..928cd576 100644
+--- a/src/ser/fmt.rs
++++ b/src/ser/fmt.rs
+@@ -58,13 +58,17 @@ impl<'a, 'b> Serializer for &'a mut fmt::Formatter<'b> {
+         serialize_u32: u32,
+         serialize_u64: u64,
+         serialize_u128: u128,
+-        serialize_f32: f32,
+-        serialize_f64: f64,
+         serialize_char: char,
+         serialize_str: &str,
+         serialize_unit_struct: &'static str,
+     }
+ 
++    #[cfg(not(no_fp_fmt_parse))]
++    fmt_primitives! {
++        serialize_f32: f32,
++        serialize_f64: f64,
++    }
++
+     fn serialize_unit_variant(
+         self,
+         _name: &'static str,
+diff --git a/src/ser/impls.rs b/src/ser/impls.rs
+index 39acba31..07f7795f 100644
+--- a/src/ser/impls.rs
++++ b/src/ser/impls.rs
+@@ -31,7 +31,9 @@ primitive_impl!(u16, serialize_u16);
+ primitive_impl!(u32, serialize_u32);
+ primitive_impl!(u64, serialize_u64);
+ primitive_impl!(u128, serialize_u128);
++#[cfg(not(no_fp_fmt_parse))]
+ primitive_impl!(f32, serialize_f32);
++#[cfg(not(no_fp_fmt_parse))]
+ primitive_impl!(f64, serialize_f64);
+ primitive_impl!(char, serialize_char);
+ 
+diff --git a/src/ser/mod.rs b/src/ser/mod.rs
+index f1820c20..bfa6fe8b 100644
+--- a/src/ser/mod.rs
++++ b/src/ser/mod.rs
+@@ -638,6 +638,7 @@ pub trait Serializer: Sized {
+     ///     }
+     /// }
+     /// ```
++    #[cfg(not(no_fp_fmt_parse))]
+     fn serialize_f32(self, v: f32) -> Result<Self::Ok, Self::Error>;
+ 
+     /// Serialize an `f64` value.
+@@ -656,6 +657,7 @@ pub trait Serializer: Sized {
+     ///     }
+     /// }
+     /// ```
++    #[cfg(not(no_fp_fmt_parse))]
+     fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error>;
+ 
+     /// Serialize a character.

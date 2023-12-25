@@ -1,0 +1,37 @@
+diff --git a/src/raw/mod.rs b/src/raw/mod.rs
+index 211b818..4e3edc2 100644
+--- a/src/raw/mod.rs
++++ b/src/raw/mod.rs
+@@ -1,4 +1,4 @@
+-use crate::alloc::alloc::{handle_alloc_error, Layout};
++use crate::alloc::alloc::Layout;
+ use crate::scopeguard::{guard, ScopeGuard};
+ use crate::TryReserveError;
+ use core::iter::FusedIterator;
+@@ -96,7 +96,7 @@ impl Fallibility {
+     fn alloc_err(self, layout: Layout) -> TryReserveError {
+         match self {
+             Fallibility::Fallible => TryReserveError::AllocError { layout },
+-            Fallibility::Infallible => handle_alloc_error(layout),
++            Fallibility::Infallible => panic!("we cannot handle_alloc_error"),
+         }
+     }
+ }
+diff --git a/src/set.rs b/src/set.rs
+index 2a4dcea..e2bd276 100644
+--- a/src/set.rs
++++ b/src/set.rs
+@@ -1,4 +1,5 @@
+ use crate::TryReserveError;
++#[cfg(not(no_global_oom_handling))]
+ use alloc::borrow::ToOwned;
+ use core::borrow::Borrow;
+ use core::fmt;
+@@ -853,6 +854,7 @@ where
+     /// }
+     /// assert_eq!(set.len(), 4); // a new "fish" was inserted
+     /// ```
++    #[cfg(not(no_global_oom_handling))]
+     #[inline]
+     pub fn get_or_insert_owned<Q: ?Sized>(&mut self, value: &Q) -> &T
+     where
