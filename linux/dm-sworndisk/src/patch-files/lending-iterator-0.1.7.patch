@@ -1,0 +1,38 @@
+diff --git a/src/_lib.rs b/src/_lib.rs
+index 3872b2d..4986e65 100644
+--- a/src/_lib.rs
++++ b/src/_lib.rs
+@@ -13,6 +13,7 @@
+ #![no_std]
+ #![forbid(unsafe_code)]
+ #![allow(nonstandard_style, uncommon_codepoints)]
++#![feature(allocator_api)]
+ 
+ #[macro_use]
+ mod utils;
+diff --git a/src/lending_iterator/_mod.rs b/src/lending_iterator/_mod.rs
+index 558eed7..94ab3ca 100644
+--- a/src/lending_iterator/_mod.rs
++++ b/src/lending_iterator/_mod.rs
+@@ -643,7 +643,7 @@ where
+         Self : 'usability,
+         Self : Sized,
+     {
+-        ::alloc::boxed::Box::new(self)
++        ::alloc::boxed::Box::try_new(self).unwrap()
+     }
+ 
+     /// Converts this [`LendingIterator`] into a
+diff --git a/src/lending_iterator/dyn/_mod.rs b/src/lending_iterator/dyn/_mod.rs
+index e157fa3..eee14df 100644
+--- a/src/lending_iterator/dyn/_mod.rs
++++ b/src/lending_iterator/dyn/_mod.rs
+@@ -194,7 +194,7 @@ r#dyn::with_auto_traits! {( $($AutoTraits:tt)* ) => (
+                 $($AutoTraits)*
+             >
+         {
+-            ::alloc::boxed::Box::new(self)
++            ::alloc::boxed::Box::try_new(self).unwrap()
+         }
+     }
+ )}

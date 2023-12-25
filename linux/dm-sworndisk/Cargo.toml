@@ -1,0 +1,61 @@
+[package]
+name = "dm-sworndisk"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+inherit-methods-macro = { git = "https://github.com/jinzhao-dev/inherit-methods-macro", rev = "98f7e3e" }
+pod = { git = "https://github.com/jinzhao-dev/pod", rev = "7fa2ed2" }
+
+hashbrown = "=0.12.3"
+lending-iterator = "=0.1.7"
+lru = "=0.8.1"
+postcard = "=1.0.6"
+ahash = { version = "=0.7.7", default-features = false }
+anymap = { version = "=1.0.0-beta.2", default-features = false, features = ["hashbrown"] }
+serde = { version = "=1.0.188", default-features = false, features = ["derive"] }
+
+[patch.crates-io]
+ahash = { path = "target/patch/ahash-0.7.7" }
+anymap = { path = "target/patch/anymap-1.0.0-beta.2" }
+hashbrown = { path = "target/patch/hashbrown-0.12.3" }
+lending-iterator = { path = "target/patch/lending-iterator-0.1.7" }
+lru = { path = "target/patch/lru-0.8.1" }
+postcard = { path = "target/patch/postcard-1.0.6" }
+serde = { path = "target/patch/serde-1.0.188" }
+
+[package.metadata.patch.ahash]
+patches = [
+    { path = "src/patch-files/ahash-0.7.7.patch", source = "GithubPrDiff" },
+]
+
+[package.metadata.patch.anymap]
+patches = [
+    { path = "src/patch-files/anymap-1.0.0-beta.2.patch", source = "GithubPrDiff" },
+]
+
+[package.metadata.patch.hashbrown]
+patches = [
+    { path = "src/patch-files/hashbrown-0.12.3.patch", source = "GithubPrDiff" },
+]
+
+[package.metadata.patch.lending-iterator]
+patches = [
+    { path = "src/patch-files/lending-iterator-0.1.7.patch", source = "GithubPrDiff" },
+]
+
+[package.metadata.patch.lru]
+patches = [
+    { path = "src/patch-files/lru-0.8.1.patch", source = "GithubPrDiff" },
+]
+
+[package.metadata.patch.postcard]
+patches = [
+    { path = "src/patch-files/postcard-1.0.6.patch", source = "GithubPrDiff" },
+]
+
+[package.metadata.patch.serde]
+patches = [
+    { path = "src/patch-files/serde-1.0.188.patch", source = "GithubPrDiff" },
+]
+
