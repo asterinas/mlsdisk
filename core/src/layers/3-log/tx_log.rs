@@ -65,12 +65,13 @@ use crate::layers::bio::{BlockId, BlockSet, Buf, BufMut, BufRef};
 use crate::layers::crypto::{CryptoLog, NodeCache, RootMhtMeta};
 use crate::layers::edit::{CompactPolicy, Edit, EditJournal, EditJournalMeta};
 use crate::layers::log::chunk::CHUNK_NBLOCKS;
-use crate::os::{AeadKey as Key, Mutex, RwLock, Skcipher, SkcipherIv, SkcipherKey};
+use crate::os::{
+    AeadKey as Key, HashMap, HashSet, Mutex, RwLock, Skcipher, SkcipherIv, SkcipherKey,
+};
 use crate::prelude::*;
 use crate::tx::{CurrentTx, Tx, TxData, TxId, TxProvider};
-use crate::util::{LazyDelete, RandomInit};
+use crate::util::LazyDelete;
 
-use alloc::collections::{BTreeMap, BTreeSet}; // TODO: Find alternatives to adapt 'rust-for-linux'
 use core::any::Any;
 use core::sync::atomic::{AtomicBool, Ordering};
 use lru::LruCache;
@@ -214,7 +215,7 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
         let new_self = {
             // Prepare lazy deletes and log caches first from persistent state
             let (lazy_deletes, log_caches) = {
-                let (mut delete_table, mut cache_table) = (BTreeMap::new(), BTreeMap::new());
+                let (mut delete_table, mut cache_table) = (HashMap::new(), HashMap::new());
                 for log_id in state.list_all_logs() {
                     Self::add_lazy_delete(log_id, &mut delete_table, &raw_log_store);
                     cache_table.insert(log_id, Arc::new(CryptoLogCache::new(log_id, &tx_provider)));
@@ -320,7 +321,7 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
 
     fn add_lazy_delete(
         log_id: TxLogId,
-        delete_table: &mut BTreeMap<TxLogId, Arc<LazyDelete<TxLogId>>>,
+        delete_table: &mut HashMap<TxLogId, Arc<LazyDelete<TxLogId>>>,
         raw_log_store: &Arc<RawLogStore<D>>,
     ) {
         let raw_log_store = raw_log_store.clone();
@@ -801,15 +802,15 @@ impl CacheInner {
 /// The volatile and persistent state of a `TxLogStore`.
 struct State {
     persistent: TxLogStoreState,
-    lazy_deletes: BTreeMap<TxLogId, Arc<LazyDelete<TxLogId>>>,
-    log_caches: BTreeMap<TxLogId, Arc<CryptoLogCache>>,
+    lazy_deletes: HashMap<TxLogId, Arc<LazyDelete<TxLogId>>>,
+    log_caches: HashMap<TxLogId, Arc<CryptoLogCache>>,
 }
 
 /// The persistent state of a `TxLogStore`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TxLogStoreState {
-    log_table: BTreeMap<TxLogId, TxLogEntry>,
-    bucket_table: BTreeMap<BucketName, Bucket>,
+    log_table: HashMap<TxLogId, TxLogEntry>,
+    bucket_table: HashMap<BucketName, Bucket>,
 }
 
 /// A log entry implies the persistent state of the tx log.
@@ -823,14 +824,14 @@ pub struct TxLogEntry {
 /// A bucket contains a set of logs which have the same name.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Bucket {
-    log_ids: BTreeSet<TxLogId>,
+    log_ids: HashSet<TxLogId>,
 }
 
 impl State {
     pub fn new(
         persistent: TxLogStoreState,
-        lazy_deletes: BTreeMap<TxLogId, Arc<LazyDelete<TxLogId>>>,
-        log_caches: BTreeMap<TxLogId, Arc<CryptoLogCache>>,
+        lazy_deletes: HashMap<TxLogId, Arc<LazyDelete<TxLogId>>>,
+        log_caches: HashMap<TxLogId, Arc<CryptoLogCache>>,
     ) -> Self {
         Self {
             persistent,
@@ -847,8 +848,8 @@ impl State {
 impl TxLogStoreState {
     pub fn new() -> Self {
         Self {
-            log_table: BTreeMap::new(),
-            bucket_table: BTreeMap::new(),
+            log_table: HashMap::new(),
+            bucket_table: HashMap::new(),
         }
     }
 
@@ -877,7 +878,7 @@ impl TxLogStoreState {
                 self.bucket_table.insert(
                     bucket,
                     Bucket {
-                        log_ids: BTreeSet::from([new_log_id]),
+                        log_ids: HashSet::from([new_log_id]),
                     },
                 );
             }
@@ -889,7 +890,7 @@ impl TxLogStoreState {
         entry.root_mht = root_mht;
     }
 
-    pub fn list_logs(&self, bucket_name: &str) -> Result<BTreeSet<TxLogId>> {
+    pub fn list_logs(&self, bucket_name: &str) -> Result<HashSet<TxLogId>> {
         let bucket = self
             .bucket_table
             .get(&bucket_name.to_string())
@@ -930,17 +931,17 @@ impl TxLogStoreState {
 /// A persistent edit to the state of `TxLogStore`.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct TxLogStoreEdit {
-    edit_table: BTreeMap<TxLogId, TxLogEdit>,
+    edit_table: HashMap<TxLogId, TxLogEdit>,
 }
 
 /// Used for per-TX data, track open logs in memory
 pub(super) struct OpenLogTable<D> {
-    open_table: BTreeMap<TxLogId, Arc<TxLogInner<D>>>,
+    open_table: HashMap<TxLogId, Arc<TxLogInner<D>>>,
 }
 
 /// Used for per-TX data, track open log caches in memory
 pub(super) struct OpenLogCache {
-    open_table: BTreeMap<TxLogId, CacheInner>,
+    open_table: HashMap<TxLogId, CacheInner>,
 }
 
 /// The basic unit of a persistent edit to the state of `TxLogStore`.
@@ -968,7 +969,7 @@ pub(super) struct TxLogAppend {
 impl TxLogStoreEdit {
     pub fn new() -> Self {
         Self {
-            edit_table: BTreeMap::new(),
+            edit_table: HashMap::new(),
         }
     }
 
@@ -1097,7 +1098,7 @@ impl TxData for TxLogStoreEdit {}
 impl<D> OpenLogTable<D> {
     pub fn new() -> Self {
         Self {
-            open_table: BTreeMap::new(),
+            open_table: HashMap::new(),
         }
     }
 }
@@ -1105,7 +1106,7 @@ impl<D> OpenLogTable<D> {
 impl OpenLogCache {
     pub fn new() -> Self {
         Self {
-            open_table: BTreeMap::new(),
+            open_table: HashMap::new(),
         }
     }
 }

@@ -1,6 +1,8 @@
 use core::marker::PhantomData;
 use serde::{ser::SerializeSeq, Deserialize, Serialize};
 
+use crate::prelude::*;
+
 /// An edit of `Edit<S>` is an incremental change to a state of `S`.
 pub trait Edit<S>: Serialize + for<'de> Deserialize<'de> {
     /// Apply this edit to a state.

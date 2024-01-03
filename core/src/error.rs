@@ -23,6 +23,10 @@ pub enum Errno {
     DecryptFailed,
     /// Not aligned to `BLOCK_SIZE`.
     NotBlockSizeAligned,
+    /// RwLock try_read failed.
+    TryReadFailed,
+    /// RwLock try_write failed.
+    TryWriteFailed,
 }
 
 /// error used in this crate

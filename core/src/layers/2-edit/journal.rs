@@ -1,4 +1,3 @@
-use alloc::sync::Arc;
 use core::marker::PhantomData;
 use lending_iterator::LendingIterator;
 use pod::Pod;
@@ -195,7 +194,7 @@ where
             snapshot_area_nblocks: self.snapshots.nblocks(),
             snapshot_area_keys: self.snapshots.keys(),
             journal_area_nblocks: self.journal_chain.inner_log().storage().nblocks(),
-            journal_area_key: self.journal_chain.key().to_owned(),
+            journal_area_key: self.journal_chain.key().clone(),
         }
     }
 
