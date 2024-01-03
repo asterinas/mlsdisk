@@ -11,9 +11,18 @@ index 2360a174..b442266a 100644
      fn visit_f64<E>(self, x: f64) -> Result<Self::Value, E> {
          let _ = x;
 diff --git a/src/de/impls.rs b/src/de/impls.rs
-index fbee1554..b3843522 100644
+index fbee1554..31fcb363 100644
 --- a/src/de/impls.rs
 +++ b/src/de/impls.rs
+@@ -7,7 +7,7 @@ use crate::de::{
+ 
+ use crate::seed::InPlaceSeed;
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ use crate::de::size_hint;
+ 
+ ////////////////////////////////////////////////////////////////////////////////
 @@ -348,6 +348,7 @@ impl_deserialize_num! {
      uint_to_self!(u32:visit_u32 u64:visit_u64);
  }
@@ -30,8 +39,218 @@ index fbee1554..b3843522 100644
  impl_deserialize_num! {
      f64, deserialize_f64
      num_self!(f64:visit_f64);
+@@ -466,12 +468,12 @@ impl<'de> Deserialize<'de> for char {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ struct StringVisitor;
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ struct StringInPlaceVisitor<'a>(&'a mut String);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de> Visitor<'de> for StringVisitor {
+     type Value = String;
+ 
+@@ -517,7 +519,7 @@ impl<'de> Visitor<'de> for StringVisitor {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, 'de> Visitor<'de> for StringInPlaceVisitor<'a> {
+     type Value = ();
+ 
+@@ -573,7 +575,7 @@ impl<'a, 'de> Visitor<'de> for StringInPlaceVisitor<'a> {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de> Deserialize<'de> for String {
+     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+     where
+@@ -662,10 +664,10 @@ impl<'de: 'a, 'a> Deserialize<'de> for &'a [u8] {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "alloc")))]
++#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "no-alloc")))]
+ struct CStringVisitor;
+ 
+-#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "alloc")))]
++#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "no-alloc")))]
+ impl<'de> Visitor<'de> for CStringVisitor {
+     type Value = CString;
+ 
+@@ -716,7 +718,7 @@ impl<'de> Visitor<'de> for CStringVisitor {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "alloc")))]
++#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "no-alloc")))]
+ impl<'de> Deserialize<'de> for CString {
+     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+     where
+@@ -743,7 +745,7 @@ macro_rules! forwarded_impl {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "alloc")))]
++#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "no-alloc")))]
+ forwarded_impl!((), Box<CStr>, CString::into_boxed_c_str);
+ 
+ forwarded_impl!((T), Reverse<T>, Reverse);
+@@ -852,7 +854,7 @@ impl<'de, T: ?Sized> Deserialize<'de> for PhantomData<T> {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ macro_rules! seq_impl {
+     (
+         $ty:ident <T $(: $tbound1:ident $(+ $tbound2:ident)*)* $(, $typaram:ident : $bound1:ident $(+ $bound2:ident)*)*>,
+@@ -946,10 +948,10 @@ macro_rules! seq_impl {
+ }
+ 
+ // Dummy impl of reserve
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ fn nop_reserve<T>(_seq: T, _n: usize) {}
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ seq_impl!(
+     BinaryHeap<T: Ord>,
+     seq,
+@@ -959,7 +961,7 @@ seq_impl!(
+     BinaryHeap::push
+ );
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ seq_impl!(
+     BTreeSet<T: Eq + Ord>,
+     seq,
+@@ -969,7 +971,7 @@ seq_impl!(
+     BTreeSet::insert
+ );
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ seq_impl!(
+     LinkedList<T>,
+     seq,
+@@ -989,7 +991,7 @@ seq_impl!(
+     HashSet::insert
+ );
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ seq_impl!(
+     VecDeque<T>,
+     seq,
+@@ -1001,7 +1003,7 @@ seq_impl!(
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, T> Deserialize<'de> for Vec<T>
+ where
+     T: Deserialize<'de>,
+@@ -1347,7 +1349,7 @@ tuple_impls! {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ macro_rules! map_impl {
+     (
+         $ty:ident <K $(: $kbound1:ident $(+ $kbound2:ident)*)*, V $(, $typaram:ident : $bound1:ident $(+ $bound2:ident)*)*>,
+@@ -1402,7 +1404,7 @@ macro_rules! map_impl {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ map_impl!(BTreeMap<K: Ord, V>, map, BTreeMap::new());
+ 
+ #[cfg(feature = "std")]
+@@ -1778,19 +1780,19 @@ impl<'de> Deserialize<'de> for OsString {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ forwarded_impl!((T), Box<T>, Box::new);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ forwarded_impl!((T), Box<[T]>, Vec::into_boxed_slice);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ forwarded_impl!((), Box<str>, String::into_boxed_str);
+ 
+ #[cfg(all(feature = "std", any(unix, windows)))]
+ forwarded_impl!((), Box<OsStr>, OsString::into_boxed_os_str);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, 'a, T: ?Sized> Deserialize<'de> for Cow<'a, T>
+ where
+     T: ToOwned,
+@@ -1811,7 +1813,7 @@ where
+ /// `Weak<T>` has a reference count of 0 and cannot be upgraded.
+ ///
+ /// [`"rc"`]: https://serde.rs/feature-flags.html#-features-rc
+-#[cfg(all(feature = "rc", any(feature = "std", feature = "alloc")))]
++#[cfg(all(feature = "rc", any(feature = "std", feature = "no-alloc")))]
+ impl<'de, T: ?Sized> Deserialize<'de> for RcWeak<T>
+ where
+     T: Deserialize<'de>,
+@@ -1829,7 +1831,7 @@ where
+ /// `Weak<T>` has a reference count of 0 and cannot be upgraded.
+ ///
+ /// [`"rc"`]: https://serde.rs/feature-flags.html#-features-rc
+-#[cfg(all(feature = "rc", any(feature = "std", feature = "alloc")))]
++#[cfg(all(feature = "rc", any(feature = "std", feature = "no-alloc")))]
+ impl<'de, T: ?Sized> Deserialize<'de> for ArcWeak<T>
+ where
+     T: Deserialize<'de>,
+@@ -1845,7 +1847,7 @@ where
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(all(feature = "rc", any(feature = "std", feature = "alloc")))]
++#[cfg(all(feature = "rc", any(feature = "std", feature = "no-alloc")))]
+ macro_rules! box_forwarded_impl {
+     (
+         $(#[doc = $doc:tt])*
+@@ -1866,7 +1868,7 @@ macro_rules! box_forwarded_impl {
+     };
+ }
+ 
+-#[cfg(all(feature = "rc", any(feature = "std", feature = "alloc")))]
++#[cfg(all(feature = "rc", any(feature = "std", feature = "no-alloc")))]
+ box_forwarded_impl! {
+     /// This impl requires the [`"rc"`] Cargo feature of Serde.
+     ///
+@@ -1878,7 +1880,7 @@ box_forwarded_impl! {
+     Rc
+ }
+ 
+-#[cfg(all(feature = "rc", any(feature = "std", feature = "alloc")))]
++#[cfg(all(feature = "rc", any(feature = "std", feature = "no-alloc")))]
+ box_forwarded_impl! {
+     /// This impl requires the [`"rc"`] Cargo feature of Serde.
+     ///
 diff --git a/src/de/mod.rs b/src/de/mod.rs
-index afbc23af..d0cc5f32 100644
+index afbc23af..113896c3 100644
 --- a/src/de/mod.rs
 +++ b/src/de/mod.rs
 @@ -346,6 +346,7 @@ pub enum Unexpected<'a> {
@@ -73,6 +292,15 @@ index afbc23af..d0cc5f32 100644
  
      /// Hint that the `Deserialize` type is expecting a `char` value.
      fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+@@ -1218,7 +1228,7 @@ pub trait Deserializer<'de>: Sized {
+     }
+ 
+     // Not public API.
+-    #[cfg(all(not(no_serde_derive), any(feature = "std", feature = "alloc")))]
++    #[cfg(all(not(no_serde_derive), any(feature = "std", feature = "no-alloc")))]
+     #[doc(hidden)]
+     fn __deserialize_content<V>(
+         self,
 @@ -1442,6 +1452,7 @@ pub trait Visitor<'de>: Sized {
      /// The default implementation forwards to [`visit_f64`].
      ///
@@ -89,10 +317,91 @@ index afbc23af..d0cc5f32 100644
      fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
      where
          E: Error,
+@@ -1524,7 +1536,7 @@ pub trait Visitor<'de>: Sized {
+     /// The default implementation forwards to `visit_str` and then drops the
+     /// `String`.
+     #[inline]
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+     where
+         E: Error,
+@@ -1582,7 +1594,7 @@ pub trait Visitor<'de>: Sized {
+     ///
+     /// The default implementation forwards to `visit_bytes` and then drops the
+     /// `Vec<u8>`.
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+     where
+         E: Error,
+diff --git a/src/de/size_hint.rs b/src/de/size_hint.rs
+index 4a4fe25d..e88917cd 100644
+--- a/src/de/size_hint.rs
++++ b/src/de/size_hint.rs
+@@ -7,7 +7,7 @@ where
+     helper(iter.size_hint())
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub fn cautious<Element>(hint: Option<usize>) -> usize {
+     const MAX_PREALLOC_BYTES: usize = 1024 * 1024;
+ 
 diff --git a/src/de/value.rs b/src/de/value.rs
-index 1234b810..e5edd625 100644
+index 1234b810..82af5e82 100644
 --- a/src/de/value.rs
 +++ b/src/de/value.rs
+@@ -52,13 +52,13 @@ pub struct Error {
+     err: ErrorImpl,
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ type ErrorImpl = Box<str>;
+-#[cfg(not(any(feature = "std", feature = "alloc")))]
++#[cfg(not(any(feature = "std", feature = "no-alloc")))]
+ type ErrorImpl = ();
+ 
+ impl de::Error for Error {
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     #[cold]
+     fn custom<T>(msg: T) -> Self
+     where
+@@ -69,7 +69,7 @@ impl de::Error for Error {
+         }
+     }
+ 
+-    #[cfg(not(any(feature = "std", feature = "alloc")))]
++    #[cfg(not(any(feature = "std", feature = "no-alloc")))]
+     #[cold]
+     fn custom<T>(msg: T) -> Self
+     where
+@@ -91,12 +91,12 @@ impl ser::Error for Error {
+ }
+ 
+ impl Display for Error {
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+         formatter.write_str(&self.err)
+     }
+ 
+-    #[cfg(not(any(feature = "std", feature = "alloc")))]
++    #[cfg(not(any(feature = "std", feature = "no-alloc")))]
+     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+         formatter.write_str("Serde deserialization error")
+     }
+@@ -105,7 +105,7 @@ impl Display for Error {
+ impl Debug for Error {
+     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+         let mut debug = formatter.debug_tuple("Error");
+-        #[cfg(any(feature = "std", feature = "alloc"))]
++        #[cfg(any(feature = "std", feature = "no-alloc"))]
+         debug.field(&self.err);
+         debug.finish()
+     }
 @@ -299,7 +299,9 @@ primitive_deserializer!(u16, "a `u16`.", U16Deserializer, visit_u16);
  primitive_deserializer!(u64, "a `u64`.", U64Deserializer, visit_u64);
  primitive_deserializer!(u128, "a `u128`.", U128Deserializer, visit_u128);
@@ -103,11 +412,398 @@ index 1234b810..e5edd625 100644
  primitive_deserializer!(f64, "an `f64`.", F64Deserializer, visit_f64);
  primitive_deserializer!(char, "a `char`.", CharDeserializer, visit_char);
  
+@@ -561,13 +563,13 @@ impl<'de, E> Debug for BorrowedStrDeserializer<'de, E> {
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ /// A deserializer holding a `String`.
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub struct StringDeserializer<E> {
+     value: String,
+     marker: PhantomData<E>,
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<E> Clone for StringDeserializer<E> {
+     fn clone(&self) -> Self {
+         StringDeserializer {
+@@ -577,7 +579,7 @@ impl<E> Clone for StringDeserializer<E> {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, E> IntoDeserializer<'de, E> for String
+ where
+     E: de::Error,
+@@ -589,7 +591,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<E> StringDeserializer<E> {
+     #[allow(missing_docs)]
+     pub fn new(value: String) -> Self {
+@@ -600,7 +602,7 @@ impl<E> StringDeserializer<E> {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, E> de::Deserializer<'de> for StringDeserializer<E>
+ where
+     E: de::Error,
+@@ -635,7 +637,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, E> de::EnumAccess<'de> for StringDeserializer<E>
+ where
+     E: de::Error,
+@@ -651,7 +653,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<E> Debug for StringDeserializer<E> {
+     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+         formatter
+@@ -664,13 +666,13 @@ impl<E> Debug for StringDeserializer<E> {
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ /// A deserializer holding a `Cow<str>`.
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub struct CowStrDeserializer<'a, E> {
+     value: Cow<'a, str>,
+     marker: PhantomData<E>,
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, E> Clone for CowStrDeserializer<'a, E> {
+     fn clone(&self) -> Self {
+         CowStrDeserializer {
+@@ -680,7 +682,7 @@ impl<'a, E> Clone for CowStrDeserializer<'a, E> {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, 'a, E> IntoDeserializer<'de, E> for Cow<'a, str>
+ where
+     E: de::Error,
+@@ -692,7 +694,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, E> CowStrDeserializer<'a, E> {
+     #[allow(missing_docs)]
+     pub fn new(value: Cow<'a, str>) -> Self {
+@@ -703,7 +705,7 @@ impl<'a, E> CowStrDeserializer<'a, E> {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, 'a, E> de::Deserializer<'de> for CowStrDeserializer<'a, E>
+ where
+     E: de::Error,
+@@ -741,7 +743,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, 'a, E> de::EnumAccess<'de> for CowStrDeserializer<'a, E>
+ where
+     E: de::Error,
+@@ -757,7 +759,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, E> Debug for CowStrDeserializer<'a, E> {
+     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+         formatter
+@@ -998,7 +1000,7 @@ where
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, T, E> IntoDeserializer<'de, E> for Vec<T>
+ where
+     T: IntoDeserializer<'de, E>,
+@@ -1011,7 +1013,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, T, E> IntoDeserializer<'de, E> for BTreeSet<T>
+ where
+     T: IntoDeserializer<'de, E> + Eq + Ord,
+@@ -1410,7 +1412,7 @@ impl Expected for ExpectedInMap {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'de, K, V, E> IntoDeserializer<'de, E> for BTreeMap<K, V>
+ where
+     K: IntoDeserializer<'de, E> + Eq + Ord,
+diff --git a/src/lib.rs b/src/lib.rs
+index f7d44574..61b324b5 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -152,7 +152,7 @@
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(feature = "alloc")]
++#[cfg(feature = "no-alloc")]
+ extern crate alloc;
+ 
+ /// A facade around all the types we need from the `std`, `core`, and `alloc`
+@@ -184,37 +184,37 @@ mod lib {
+     pub use self::core::result::{self, Result};
+     pub use self::core::time::Duration;
+ 
+-    #[cfg(all(feature = "alloc", not(feature = "std")))]
++    #[cfg(all(feature = "no-alloc", not(feature = "std")))]
+     pub use alloc::borrow::{Cow, ToOwned};
+     #[cfg(feature = "std")]
+     pub use std::borrow::{Cow, ToOwned};
+ 
+-    #[cfg(all(feature = "alloc", not(feature = "std")))]
++    #[cfg(all(feature = "no-alloc", not(feature = "std")))]
+     pub use alloc::string::{String, ToString};
+     #[cfg(feature = "std")]
+     pub use std::string::{String, ToString};
+ 
+-    #[cfg(all(feature = "alloc", not(feature = "std")))]
++    #[cfg(all(feature = "no-alloc", not(feature = "std")))]
+     pub use alloc::vec::Vec;
+     #[cfg(feature = "std")]
+     pub use std::vec::Vec;
+ 
+-    #[cfg(all(feature = "alloc", not(feature = "std")))]
++    #[cfg(all(feature = "no-alloc", not(feature = "std")))]
+     pub use alloc::boxed::Box;
+     #[cfg(feature = "std")]
+     pub use std::boxed::Box;
+ 
+-    #[cfg(all(feature = "rc", feature = "alloc", not(feature = "std")))]
++    #[cfg(all(feature = "rc", feature = "no-alloc", not(feature = "std")))]
+     pub use alloc::rc::{Rc, Weak as RcWeak};
+     #[cfg(all(feature = "rc", feature = "std"))]
+     pub use std::rc::{Rc, Weak as RcWeak};
+ 
+-    #[cfg(all(feature = "rc", feature = "alloc", not(feature = "std")))]
++    #[cfg(all(feature = "rc", feature = "no-alloc", not(feature = "std")))]
+     pub use alloc::sync::{Arc, Weak as ArcWeak};
+     #[cfg(all(feature = "rc", feature = "std"))]
+     pub use std::sync::{Arc, Weak as ArcWeak};
+ 
+-    #[cfg(all(feature = "alloc", not(feature = "std")))]
++    #[cfg(all(feature = "no-alloc", not(feature = "std")))]
+     pub use alloc::collections::{BTreeMap, BTreeSet, BinaryHeap, LinkedList, VecDeque};
+     #[cfg(feature = "std")]
+     pub use std::collections::{BTreeMap, BTreeSet, BinaryHeap, LinkedList, VecDeque};
+@@ -224,7 +224,7 @@ mod lib {
+     #[cfg(feature = "std")]
+     pub use std::ffi::CStr;
+ 
+-    #[cfg(all(not(no_core_cstr), feature = "alloc", not(feature = "std")))]
++    #[cfg(all(not(no_core_cstr), feature = "no-alloc", not(feature = "std")))]
+     pub use alloc::ffi::CString;
+     #[cfg(feature = "std")]
+     pub use std::ffi::CString;
+@@ -321,7 +321,7 @@ extern crate serde_derive;
+ #[cfg(feature = "serde_derive")]
+ pub use serde_derive::{Deserialize, Serialize};
+ 
+-#[cfg(all(not(no_serde_derive), any(feature = "std", feature = "alloc")))]
++#[cfg(all(not(no_serde_derive), any(feature = "std", feature = "no-alloc")))]
+ mod actually_private {
+     pub struct T;
+ }
+diff --git a/src/private/de.rs b/src/private/de.rs
+index 883e6909..11c1e270 100644
+--- a/src/private/de.rs
++++ b/src/private/de.rs
+@@ -6,10 +6,10 @@ use crate::de::{
+     Visitor,
+ };
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ use crate::de::{MapAccess, Unexpected};
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub use self::content::{
+     Content, ContentDeserializer, ContentRefDeserializer, EnumDeserializer,
+     InternallyTaggedUnitVisitor, TagContentOtherField, TagContentOtherFieldVisitor,
+@@ -58,7 +58,7 @@ where
+     Deserialize::deserialize(deserializer)
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub fn borrow_cow_str<'de: 'a, 'a, D, R>(deserializer: D) -> Result<R, D::Error>
+ where
+     D: Deserializer<'de>,
+@@ -131,7 +131,7 @@ where
+     deserializer.deserialize_str(CowStrVisitor).map(From::from)
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub fn borrow_cow_bytes<'de: 'a, 'a, D, R>(deserializer: D) -> Result<R, D::Error>
+ where
+     D: Deserializer<'de>,
+@@ -194,7 +194,7 @@ where
+         .map(From::from)
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ mod content {
+     // This module is private and nothing here should be used outside of
+     // generated code.
+@@ -2586,13 +2586,13 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub struct FlatMapDeserializer<'a, 'de: 'a, E>(
+     pub &'a mut Vec<Option<(Content<'de>, Content<'de>)>>,
+     pub PhantomData<E>,
+ );
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, 'de, E> FlatMapDeserializer<'a, 'de, E>
+ where
+     E: Error,
+@@ -2602,7 +2602,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ macro_rules! forward_to_deserialize_other {
+     ($($func:ident ($($arg:ty),*))*) => {
+         $(
+@@ -2616,7 +2616,7 @@ macro_rules! forward_to_deserialize_other {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, 'de, E> Deserializer<'de> for FlatMapDeserializer<'a, 'de, E>
+ where
+     E: Error,
+@@ -2735,14 +2735,14 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ struct FlatMapAccess<'a, 'de: 'a, E> {
+     iter: slice::Iter<'a, Option<(Content<'de>, Content<'de>)>>,
+     pending_content: Option<&'a Content<'de>>,
+     _marker: PhantomData<E>,
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, 'de, E> MapAccess<'de> for FlatMapAccess<'a, 'de, E>
+ where
+     E: Error,
+@@ -2778,7 +2778,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ struct FlatStructAccess<'a, 'de: 'a, E> {
+     iter: slice::IterMut<'a, Option<(Content<'de>, Content<'de>)>>,
+     pending_content: Option<Content<'de>>,
+@@ -2786,7 +2786,7 @@ struct FlatStructAccess<'a, 'de: 'a, E> {
+     _marker: PhantomData<E>,
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, 'de, E> MapAccess<'de> for FlatStructAccess<'a, 'de, E>
+ where
+     E: Error,
+@@ -2819,7 +2819,7 @@ where
+ 
+ /// Claims one key-value pair from a FlatMapDeserializer's field buffer if the
+ /// field name matches any of the recognized ones.
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ fn flat_map_take_entry<'de>(
+     entry: &mut Option<(Content<'de>, Content<'de>)>,
+     recognized: &[&str],
+diff --git a/src/private/mod.rs b/src/private/mod.rs
+index 177f8501..8fb6c480 100644
+--- a/src/private/mod.rs
++++ b/src/private/mod.rs
+@@ -17,7 +17,7 @@ pub use crate::lib::result::Result::{self, Err, Ok};
+ 
+ pub use self::string::from_utf8_lossy;
+ 
+-#[cfg(any(feature = "alloc", feature = "std"))]
++#[cfg(any(feature = "no-alloc", feature = "std"))]
+ pub use crate::lib::{ToString, Vec};
+ 
+ #[cfg(not(no_core_try_from))]
+@@ -26,7 +26,7 @@ pub use crate::lib::convert::TryFrom;
+ mod string {
+     use crate::lib::*;
+ 
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     pub fn from_utf8_lossy(bytes: &[u8]) -> Cow<str> {
+         String::from_utf8_lossy(bytes)
+     }
+@@ -38,7 +38,7 @@ mod string {
+     //
+     // so it is okay for the return type to be different from the std case as long
+     // as the above works.
+-    #[cfg(not(any(feature = "std", feature = "alloc")))]
++    #[cfg(not(any(feature = "std", feature = "no-alloc")))]
+     pub fn from_utf8_lossy(bytes: &[u8]) -> &str {
+         // Three unicode replacement characters if it fails. They look like a
+         // white-on-black question mark. The user will recognize it as invalid
 diff --git a/src/private/ser.rs b/src/private/ser.rs
-index 50bcb251..7ff92cd0 100644
+index 50bcb251..6bd2105e 100644
 --- a/src/private/ser.rs
 +++ b/src/private/ser.rs
-@@ -46,6 +46,7 @@ struct TaggedSerializer<S> {
+@@ -2,7 +2,7 @@ use crate::lib::*;
+ 
+ use crate::ser::{self, Impossible, Serialize, SerializeMap, SerializeStruct, Serializer};
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ use self::content::{
+     Content, ContentSerializer, SerializeStructVariantAsMapValue, SerializeTupleVariantAsMapValue,
+ };
+@@ -46,12 +46,13 @@ struct TaggedSerializer<S> {
  enum Unsupported {
      Boolean,
      Integer,
@@ -115,7 +811,14 @@ index 50bcb251..7ff92cd0 100644
      Float,
      Char,
      String,
-@@ -64,6 +65,7 @@ impl Display for Unsupported {
+     ByteArray,
+     Optional,
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     UnitStruct,
+     Sequence,
+     Tuple,
+@@ -64,12 +65,13 @@ impl Display for Unsupported {
          match *self {
              Unsupported::Boolean => formatter.write_str("a boolean"),
              Unsupported::Integer => formatter.write_str("an integer"),
@@ -123,6 +826,32 @@ index 50bcb251..7ff92cd0 100644
              Unsupported::Float => formatter.write_str("a float"),
              Unsupported::Char => formatter.write_str("a char"),
              Unsupported::String => formatter.write_str("a string"),
+             Unsupported::ByteArray => formatter.write_str("a byte array"),
+             Unsupported::Optional => formatter.write_str("an optional"),
+-            #[cfg(any(feature = "std", feature = "alloc"))]
++            #[cfg(any(feature = "std", feature = "no-alloc"))]
+             Unsupported::UnitStruct => formatter.write_str("unit struct"),
+             Unsupported::Sequence => formatter.write_str("a sequence"),
+             Unsupported::Tuple => formatter.write_str("a tuple"),
+@@ -104,14 +106,14 @@ where
+     type SerializeMap = S::SerializeMap;
+     type SerializeStruct = S::SerializeStruct;
+ 
+-    #[cfg(not(any(feature = "std", feature = "alloc")))]
++    #[cfg(not(any(feature = "std", feature = "no-alloc")))]
+     type SerializeTupleVariant = Impossible<S::Ok, S::Error>;
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     type SerializeTupleVariant = SerializeTupleVariantAsMapValue<S::SerializeMap>;
+ 
+-    #[cfg(not(any(feature = "std", feature = "alloc")))]
++    #[cfg(not(any(feature = "std", feature = "no-alloc")))]
+     type SerializeStructVariant = Impossible<S::Ok, S::Error>;
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     type SerializeStructVariant = SerializeStructVariantAsMapValue<S::SerializeMap>;
+ 
+     fn serialize_bool(self, _: bool) -> Result<Self::Ok, Self::Error> {
 @@ -150,10 +152,12 @@ where
          Err(self.bad_type(Unsupported::Integer))
      }
@@ -136,6 +865,159 @@ index 50bcb251..7ff92cd0 100644
      fn serialize_f64(self, _: f64) -> Result<Self::Ok, Self::Error> {
          Err(self.bad_type(Unsupported::Float))
      }
+@@ -248,7 +252,7 @@ where
+         Err(self.bad_type(Unsupported::TupleStruct))
+     }
+ 
+-    #[cfg(not(any(feature = "std", feature = "alloc")))]
++    #[cfg(not(any(feature = "std", feature = "no-alloc")))]
+     fn serialize_tuple_variant(
+         self,
+         _: &'static str,
+@@ -261,7 +265,7 @@ where
+         Err(self.bad_type(Unsupported::Enum))
+     }
+ 
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     fn serialize_tuple_variant(
+         self,
+         _: &'static str,
+@@ -295,7 +299,7 @@ where
+         Ok(state)
+     }
+ 
+-    #[cfg(not(any(feature = "std", feature = "alloc")))]
++    #[cfg(not(any(feature = "std", feature = "no-alloc")))]
+     fn serialize_struct_variant(
+         self,
+         _: &'static str,
+@@ -308,7 +312,7 @@ where
+         Err(self.bad_type(Unsupported::Enum))
+     }
+ 
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     fn serialize_struct_variant(
+         self,
+         _: &'static str,
+@@ -326,7 +330,7 @@ where
+         ))
+     }
+ 
+-    #[cfg(not(any(feature = "std", feature = "alloc")))]
++    #[cfg(not(any(feature = "std", feature = "no-alloc")))]
+     fn collect_str<T: ?Sized>(self, _: &T) -> Result<Self::Ok, Self::Error>
+     where
+         T: Display,
+@@ -335,7 +339,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ mod content {
+     use crate::lib::*;
+ 
+@@ -996,10 +1000,10 @@ mod content {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub struct FlatMapSerializer<'a, M: 'a>(pub &'a mut M);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, M> FlatMapSerializer<'a, M>
+ where
+     M: SerializeMap + 'a,
+@@ -1012,7 +1016,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, M> Serializer for FlatMapSerializer<'a, M>
+ where
+     M: SerializeMap + 'a,
+@@ -1191,10 +1195,10 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub struct FlatMapSerializeMap<'a, M: 'a>(&'a mut M);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, M> ser::SerializeMap for FlatMapSerializeMap<'a, M>
+ where
+     M: SerializeMap + 'a,
+@@ -1233,10 +1237,10 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub struct FlatMapSerializeStruct<'a, M: 'a>(&'a mut M);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, M> ser::SerializeStruct for FlatMapSerializeStruct<'a, M>
+ where
+     M: SerializeMap + 'a,
+@@ -1262,13 +1266,13 @@ where
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub struct FlatMapSerializeTupleVariantAsMapValue<'a, M: 'a> {
+     map: &'a mut M,
+     fields: Vec<Content>,
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, M> FlatMapSerializeTupleVariantAsMapValue<'a, M>
+ where
+     M: SerializeMap + 'a,
+@@ -1281,7 +1285,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, M> ser::SerializeTupleVariant for FlatMapSerializeTupleVariantAsMapValue<'a, M>
+ where
+     M: SerializeMap + 'a,
+@@ -1306,14 +1310,14 @@ where
+ 
+ ////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ pub struct FlatMapSerializeStructVariantAsMapValue<'a, M: 'a> {
+     map: &'a mut M,
+     name: &'static str,
+     fields: Vec<(&'static str, Content)>,
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, M> FlatMapSerializeStructVariantAsMapValue<'a, M>
+ where
+     M: SerializeMap + 'a,
+@@ -1327,7 +1331,7 @@ where
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl<'a, M> ser::SerializeStructVariant for FlatMapSerializeStructVariantAsMapValue<'a, M>
+ where
+     M: SerializeMap + 'a,
 diff --git a/src/ser/fmt.rs b/src/ser/fmt.rs
 index 0650ab6f..928cd576 100644
 --- a/src/ser/fmt.rs
@@ -161,7 +1043,7 @@ index 0650ab6f..928cd576 100644
          self,
          _name: &'static str,
 diff --git a/src/ser/impls.rs b/src/ser/impls.rs
-index 39acba31..07f7795f 100644
+index 39acba31..401c9bed 100644
 --- a/src/ser/impls.rs
 +++ b/src/ser/impls.rs
 @@ -31,7 +31,9 @@ primitive_impl!(u16, serialize_u16);
@@ -174,8 +1056,148 @@ index 39acba31..07f7795f 100644
  primitive_impl!(f64, serialize_f64);
  primitive_impl!(char, serialize_char);
  
+@@ -47,7 +49,7 @@ impl Serialize for str {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ impl Serialize for String {
+     #[inline]
+     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+@@ -80,7 +82,7 @@ impl Serialize for CStr {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "alloc")))]
++#[cfg(any(feature = "std", all(not(no_core_cstr), feature = "no-alloc")))]
+ impl Serialize for CString {
+     #[inline]
+     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+@@ -179,7 +181,7 @@ where
+     }
+ }
+ 
+-#[cfg(all(any(feature = "std", feature = "alloc"), not(no_relaxed_trait_bounds)))]
++#[cfg(all(any(feature = "std", feature = "no-alloc"), not(no_relaxed_trait_bounds)))]
+ macro_rules! seq_impl {
+     ($ty:ident <T $(: $tbound1:ident $(+ $tbound2:ident)*)* $(, $typaram:ident : $bound:ident)*>) => {
+         impl<T $(, $typaram)*> Serialize for $ty<T $(, $typaram)*>
+@@ -197,7 +199,7 @@ macro_rules! seq_impl {
+     }
+ }
+ 
+-#[cfg(all(any(feature = "std", feature = "alloc"), no_relaxed_trait_bounds))]
++#[cfg(all(any(feature = "std", feature = "no-alloc"), no_relaxed_trait_bounds))]
+ macro_rules! seq_impl {
+     ($ty:ident <T $(: $tbound1:ident $(+ $tbound2:ident)*)* $(, $typaram:ident : $bound:ident)*>) => {
+         impl<T $(, $typaram)*> Serialize for $ty<T $(, $typaram)*>
+@@ -216,22 +218,22 @@ macro_rules! seq_impl {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ seq_impl!(BinaryHeap<T: Ord>);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ seq_impl!(BTreeSet<T: Ord>);
+ 
+ #[cfg(feature = "std")]
+ seq_impl!(HashSet<T: Eq + Hash, H: BuildHasher>);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ seq_impl!(LinkedList<T>);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ seq_impl!(Vec<T>);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ seq_impl!(VecDeque<T>);
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+@@ -394,7 +396,7 @@ tuple_impls! {
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-#[cfg(all(any(feature = "std", feature = "alloc"), not(no_relaxed_trait_bounds)))]
++#[cfg(all(any(feature = "std", feature = "no-alloc"), not(no_relaxed_trait_bounds)))]
+ macro_rules! map_impl {
+     ($ty:ident <K $(: $kbound1:ident $(+ $kbound2:ident)*)*, V $(, $typaram:ident : $bound:ident)*>) => {
+         impl<K, V $(, $typaram)*> Serialize for $ty<K, V $(, $typaram)*>
+@@ -413,7 +415,7 @@ macro_rules! map_impl {
+     }
+ }
+ 
+-#[cfg(all(any(feature = "std", feature = "alloc"), no_relaxed_trait_bounds))]
++#[cfg(all(any(feature = "std", feature = "no-alloc"), no_relaxed_trait_bounds))]
+ macro_rules! map_impl {
+     ($ty:ident <K $(: $kbound1:ident $(+ $kbound2:ident)*)*, V $(, $typaram:ident : $bound:ident)*>) => {
+         impl<K, V $(, $typaram)*> Serialize for $ty<K, V $(, $typaram)*>
+@@ -433,7 +435,7 @@ macro_rules! map_impl {
+     }
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ map_impl!(BTreeMap<K: Ord, V>);
+ 
+ #[cfg(feature = "std")]
+@@ -462,10 +464,10 @@ macro_rules! deref_impl {
+ deref_impl!(<'a, T: ?Sized> Serialize for &'a T where T: Serialize);
+ deref_impl!(<'a, T: ?Sized> Serialize for &'a mut T where T: Serialize);
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ deref_impl!(<T: ?Sized> Serialize for Box<T> where T: Serialize);
+ 
+-#[cfg(all(feature = "rc", any(feature = "std", feature = "alloc")))]
++#[cfg(all(feature = "rc", any(feature = "std", feature = "no-alloc")))]
+ deref_impl! {
+     /// This impl requires the [`"rc"`] Cargo feature of Serde.
+     ///
+@@ -478,7 +480,7 @@ deref_impl! {
+     <T: ?Sized> Serialize for Rc<T> where T: Serialize
+ }
+ 
+-#[cfg(all(feature = "rc", any(feature = "std", feature = "alloc")))]
++#[cfg(all(feature = "rc", any(feature = "std", feature = "no-alloc")))]
+ deref_impl! {
+     /// This impl requires the [`"rc"`] Cargo feature of Serde.
+     ///
+@@ -491,7 +493,7 @@ deref_impl! {
+     <T: ?Sized> Serialize for Arc<T> where T: Serialize
+ }
+ 
+-#[cfg(any(feature = "std", feature = "alloc"))]
++#[cfg(any(feature = "std", feature = "no-alloc"))]
+ deref_impl!(<'a, T: ?Sized> Serialize for Cow<'a, T> where T: Serialize + ToOwned);
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+@@ -499,7 +501,7 @@ deref_impl!(<'a, T: ?Sized> Serialize for Cow<'a, T> where T: Serialize + ToOwne
+ /// This impl requires the [`"rc"`] Cargo feature of Serde.
+ ///
+ /// [`"rc"`]: https://serde.rs/feature-flags.html#-features-rc
+-#[cfg(all(feature = "rc", any(feature = "std", feature = "alloc")))]
++#[cfg(all(feature = "rc", any(feature = "std", feature = "no-alloc")))]
+ impl<T: ?Sized> Serialize for RcWeak<T>
+ where
+     T: Serialize,
+@@ -515,7 +517,7 @@ where
+ /// This impl requires the [`"rc"`] Cargo feature of Serde.
+ ///
+ /// [`"rc"`]: https://serde.rs/feature-flags.html#-features-rc
+-#[cfg(all(feature = "rc", any(feature = "std", feature = "alloc")))]
++#[cfg(all(feature = "rc", any(feature = "std", feature = "no-alloc")))]
+ impl<T: ?Sized> Serialize for ArcWeak<T>
+ where
+     T: Serialize,
 diff --git a/src/ser/mod.rs b/src/ser/mod.rs
-index f1820c20..bfa6fe8b 100644
+index f1820c20..b0eb7840 100644
 --- a/src/ser/mod.rs
 +++ b/src/ser/mod.rs
 @@ -638,6 +638,7 @@ pub trait Serializer: Sized {
@@ -194,3 +1216,21 @@ index f1820c20..bfa6fe8b 100644
      fn serialize_f64(self, v: f64) -> Result<Self::Ok, Self::Error>;
  
      /// Serialize a character.
+@@ -1345,7 +1347,7 @@ pub trait Serializer: Sized {
+     ///
+     /// [`String`]: https://doc.rust-lang.org/std/string/struct.String.html
+     /// [`serialize_str`]: #tymethod.serialize_str
+-    #[cfg(any(feature = "std", feature = "alloc"))]
++    #[cfg(any(feature = "std", feature = "no-alloc"))]
+     fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+     where
+         T: Display,
+@@ -1378,7 +1380,7 @@ pub trait Serializer: Sized {
+     ///     }
+     /// }
+     /// ```
+-    #[cfg(not(any(feature = "std", feature = "alloc")))]
++    #[cfg(not(any(feature = "std", feature = "no-alloc")))]
+     fn collect_str<T: ?Sized>(self, value: &T) -> Result<Self::Ok, Self::Error>
+     where
+         T: Display;

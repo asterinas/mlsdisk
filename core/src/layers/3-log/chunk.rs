@@ -37,12 +37,11 @@
 //! then the transaction can be aborted and all changes made to `chuck_alloc`
 //! during the transaction will be rolled back automatically.
 use crate::layers::edit::Edit;
-use crate::os::Mutex;
+use crate::os::{HashMap, Mutex};
 use crate::prelude::*;
 use crate::tx::{CurrentTx, Tx, TxData, TxProvider};
 use crate::util::BitMap;
 
-use alloc::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The ID of a chunk.
@@ -267,7 +266,7 @@ impl ChunkAllocState {
 /// A persistent edit to the state of a chunk allocator.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ChunkAllocEdit {
-    edit_table: BTreeMap<ChunkId, ChunkEdit>,
+    edit_table: HashMap<ChunkId, ChunkEdit>,
 }
 
 /// The smallest unit of a persistent edit to the
@@ -283,7 +282,7 @@ impl ChunkAllocEdit {
     /// Creates a new empty edit table.
     pub fn new() -> Self {
         Self {
-            edit_table: BTreeMap::new(),
+            edit_table: HashMap::new(),
         }
     }
 

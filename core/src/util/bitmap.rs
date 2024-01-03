@@ -1,7 +1,8 @@
-use alloc::vec::Vec;
 use bittle::{Bits, BitsMut};
 use core::ops::Index;
 use serde::{Deserialize, Serialize};
+
+use crate::prelude::*;
 
 /// A compact array of bits.
 #[derive(Clone, Debug, Deserialize, Serialize)]

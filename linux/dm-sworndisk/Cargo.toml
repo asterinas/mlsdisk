@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-inherit-methods-macro = { git = "https://github.com/jinzhao-dev/inherit-methods-macro", rev = "98f7e3e" }
-pod = { git = "https://github.com/jinzhao-dev/pod", rev = "7fa2ed2" }
+bindings = { path = "../bindings" }
+inherit-methods-macro = { git = "https://github.com/asterinas/inherit-methods-macro", rev = "98f7e3e" }
+pod = { git = "https://github.com/asterinas/pod", rev = "7fa2ed2" }
 
 hashbrown = "=0.12.3"
 lending-iterator = "=0.1.7"
@@ -14,6 +15,7 @@ postcard = "=1.0.6"
 ahash = { version = "=0.7.7", default-features = false }
 anymap = { version = "=1.0.0-beta.2", default-features = false, features = ["hashbrown"] }
 serde = { version = "=1.0.188", default-features = false, features = ["derive"] }
+# sworndisk = { path = "../../core", package = "sworndisk-v2", default-features = false, features = ["linux"]}
 
 [patch.crates-io]
 ahash = { path = "target/patch/ahash-0.7.7" }

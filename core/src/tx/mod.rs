@@ -7,13 +7,11 @@
 //! when TXs are created, committed, or aborted by register callbacks.
 mod current;
 
-use alloc::sync::{Arc, Weak};
 use anymap::hashbrown::AnyMap;
 use core::any::Any;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
-use hashbrown::HashMap;
 
-use crate::os::{Mutex, RwLock, Tid};
+use crate::os::{HashMap, Mutex, RwLock, Tid};
 use crate::prelude::*;
 
 pub use self::current::CurrentTx;
@@ -39,7 +37,7 @@ impl TxProvider {
             precommit_handlers: RwLock::new(Vec::new()),
             commit_handlers: RwLock::new(Vec::new()),
             abort_handlers: RwLock::new(Vec::new()),
-            weak_self: weak_self.clone(),
+            weak_self: weak_self.clone().into(),
             tx_table: Mutex::new(HashMap::new()),
         })
     }

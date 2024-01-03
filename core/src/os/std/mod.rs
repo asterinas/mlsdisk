@@ -1,13 +1,27 @@
 //! Std user space implementations.
 
-use crate::error::Errno;
-use crate::prelude::{Error, Result};
-use core::marker::PhantomData;
-use core::ptr::NonNull;
-use openssl::rand::rand_bytes;
-use openssl::symm::{decrypt, decrypt_aead, encrypt, encrypt_aead, Cipher};
+use core::{marker::PhantomData, ptr::NonNull};
+use openssl::{
+    rand::rand_bytes,
+    symm::{decrypt, decrypt_aead, encrypt, encrypt_aead, Cipher},
+};
 use pod::Pod;
 use serde::{Deserialize, Serialize};
+
+use crate::{
+    error::Errno,
+    prelude::{Error, Result},
+};
+
+/// Reuse implementations in `alloc` crate.
+pub use alloc::{
+    boxed::Box,
+    sync::{Arc, Weak},
+    vec::Vec,
+};
+
+/// Reuse implementations of `hashbrown` crate.
+pub use hashbrown::{HashMap, HashSet};
 
 /// Reuse the `Mutex` and `MutexGuard` implementation.
 pub use spin::{

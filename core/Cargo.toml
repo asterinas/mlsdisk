@@ -6,22 +6,23 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-inherit-methods-macro = {git = "https://github.com/jinzhao-dev/inherit-methods-macro", rev = "98f7e3e"}
-pod = {git = "https://github.com/jinzhao-dev/pod", rev = "7fa2ed2"}
+bindings = { path = "../linux/bindings", optional = true }
+inherit-methods-macro = {git = "https://github.com/asterinas/inherit-methods-macro", rev = "98f7e3e"}
+pod = {git = "https://github.com/asterinas/pod", rev = "7fa2ed2"}
 
-anymap = {version = "1.0.0-beta.2", default-features = false, features = ["hashbrown"]}
 array-init = "2.1.0"
 bittle = "0.5.6"
-hashbrown = "0.12.3"
-lending-iterator = "0.1.7"
-log = "0.4"
-lru = "0.8.1"
-openssl = "0.10.55"
-postcard = "1.0.0"
-serde = {version = "1.0", features = ["derive"]}
-spin = "0.9.8"
+lending-iterator = "=0.1.7"
+lru = "=0.8.1"
+postcard = "=1.0.6"
 static_assertions = "1.1.0"
-typetag = "0.2"
+ahash = { version = "=0.7.7", default-features = false }
+anymap = { version = "=1.0.0-beta.2", default-features = false, features = ["hashbrown"] }
+hashbrown = { version = "=0.12.3", features = ["serde"] }
+log = { version = "0.4", optional =  true }
+openssl = { version = "0.10.55", optional = true }
+serde = { version = "=1.0.188", default-features = false, features = ["alloc", "derive"] }
+spin = { version = "0.9.8", optional = true }
 
 [lib]
 doctest = false
@@ -29,6 +30,6 @@ doctest = false
 [features]
 default = ["std"]
 jinux = []
-linux = []
+linux = ["bindings"]
 occlum = []
-std = []
+std = ["log", "openssl", "spin"]

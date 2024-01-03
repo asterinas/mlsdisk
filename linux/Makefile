@@ -8,11 +8,14 @@ ifeq ($(shell test -d $(KDIR) && echo true),)
 $(error Invalid path specified in KDIR)
 endif
 include $(KDIR)/scripts/Kbuild.include
+TARGET := $(KDIR)/scripts/target.json
 
-CC := clang
-PWD := $(shell pwd)
-DEPS_DIR := $(PWD)/target/target/release/deps
-MOD_DIR := $(PWD)/dm-sworndisk
+CC	:= clang
+PWD	:= $(shell pwd)
+MOD_DIR	:= $(PWD)/dm-sworndisk
+BINDING_DIR	:= $(PWD)/bindings
+TARGET_DIR	:= $(PWD)/target
+DEPS_DIR	:= $(TARGET_DIR)/target/release/deps
 
 # A particular version of the Rust compiler is required.
 current = $(shell rustc --version | cut -d' ' -f2)
@@ -36,6 +39,8 @@ rust_opt_flags := \
 	-Cforce-unwind-tables=n -Ccodegen-units=1 \
 	-Zfunction-sections=n
 
+# Try NOT to modify UPPERCASE variables as much as possible, user flags should
+# add to `rust_common_flags` or `rust_opt_flags`.
 KBUILD_RUSTFLAGS := $(rust_common_flags) $(rust_opt_flags) \
 	-Zcrate-attr=no_std \
 	-Ztune-cpu=generic -Cno-redzone=y \
@@ -52,8 +57,6 @@ KBUILD_GENERATED_CFG := @$(KDIR)/include/generated/rustc_cfg
 
 CARGO_BUILD_RUSTFLAGS := $(KBUILD_RUSTFLAGS) $(KBUILD_GENERATED_CFG)
 
-TARGET := $(KDIR)/scripts/target.json
-
 export CARGO_BUILD_RUSTFLAGS
 
 CONFIG_DM_SWORNDISK 		:= m
@@ -64,10 +67,11 @@ default: dm_sworndisk.o
 
 clean:
 	@make -C $(KDIR) M=$(PWD) clean
-	@cargo clean
+	@rm -r $(TARGET_DIR)
 
 fmt:
 	@cd $(MOD_DIR) && cargo fmt
+	@cd $(BINDING_DIR) && cargo fmt
 
 # Use [cargo-patch](https://crates.io/crates/cargo-patch)
 # to patch dependencies using patch files.
@@ -76,15 +80,58 @@ ifeq ($(wildcard $(MOD_DIR)/target/patch),)
 	@cd $(MOD_DIR) && cargo patch
 endif
 
+bindgen_c_flags := -D__KERNEL__ \
+	-I $(KDIR)/arch/x86/include \
+	-I $(KDIR)/arch/x86/include/generated \
+	-I $(KDIR)/include \
+	-I $(KDIR)/arch/x86/include/uapi \
+	-I $(KDIR)/arch/x86/include/generated/uapi \
+	-I $(KDIR)/include/uapi \
+	-I $(KDIR)/include/generated/uapi \
+	-include $(KDIR)/include/linux/compiler-version.h \
+	-include $(KDIR)/include/linux/kconfig.h \
+	-include $(KDIR)/include/linux/compiler_types.h
+
+cmd_bindgen = bindgen $< $(bindgen_target_flags) \
+	--use-core --with-derive-default --ctypes-prefix core::ffi \
+	--no-layout-tests --no-debug '.*' \
+	-o $@ -- $(bindgen_c_flags) -DMODULE \
+	$(bindgen_target_cflags) $(bindgen_target_extra)
+
+$(BINDING_DIR)/src/bindings_generated.rs: private bindgen_target_flags = \
+	$(shell grep -v '^#\|^$$' $(KDIR)/rust/bindgen_parameters)
+$(BINDING_DIR)/src/bindings_generated.rs: $(BINDING_DIR)/src/bindings.h \
+	$(BINDING_DIR)/src/bindings_helpers_generated.rs
+	$(call if_changed,bindgen)
+
+$(BINDING_DIR)/src/bindings_helpers_generated.rs: private bindgen_target_flags = \
+    --blocklist-type '.*' --allowlist-var '' \
+    --allowlist-function 'helper_.*'
+$(BINDING_DIR)/src/bindings_helpers_generated.rs: private bindgen_target_extra = ; \
+    sed -Ei 's/pub fn helper_([a-zA-Z0-9_]*)/#[link_name="helper_\1"]\n    pub fn \1/g' $@
+$(BINDING_DIR)/src/bindings_helpers_generated.rs: $(BINDING_DIR)/src/helpers.c FORCE
+	$(call if_changed,bindgen)
+
 cmd_cargo_build = RUST_MODFILE=$(MOD_DIR) cargo build \
 	--target $(TARGET) \
-	--target-dir $(PWD)/target \
+	--target-dir $(TARGET_DIR) \
 	--manifest-path $(MOD_DIR)/Cargo.toml \
 	--release --verbose
 
-dm_sworndisk.o: deps $(MOD_DIR)/src/lib.rs FORCE
+# This is needed when compiles the `bindings/src/helpers.c`.
+CFLAGS += -nostdinc $(bindgen_c_flags) \
+	--target=x86_64-linux-gnu -std=gnu11 -fintegrated-as \
+	-fno-common -fno-PIE -fno-strict-aliasing \
+	-mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx \
+	-fcf-protection=none -m64 -mno-80387 -mstack-alignment=8 \
+	-mtune=generic -mno-red-zone -mcmodel=kernel \
+	-mretpoline-external-thunk
+
+dm_sworndisk.o: deps $(MOD_DIR)/src/lib.rs $(BINDING_DIR)/src/helpers.o \
+	$(BINDING_DIR)/src/bindings_generated.rs FORCE
 	$(call if_changed,cargo_build)
-	@ld.lld -r $$(ls -d $(DEPS_DIR)/* | grep '.*[\.o]$$') -o $(PWD)/$@
+	@ld.lld -r $$(ls -d $(DEPS_DIR)/* | grep '.*[\.o]$$') \
+	$(BINDING_DIR)/src/helpers.o -o $(PWD)/$@
 
 .PHONY: FORCE
 FORCE:
