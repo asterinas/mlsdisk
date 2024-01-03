@@ -11,6 +11,7 @@ use bindings::{
 use core::{
     any::Any,
     fmt,
+    hash::Hash,
     marker::{PhantomData, Tuple, Unsize},
     ops::{CoerceUnsized, Deref, DerefMut, DispatchFromDyn, Receiver},
     pin::Pin,
@@ -210,6 +211,7 @@ macro_rules! vec {
 
 /// Wrap `alloc::vec::Vec` provided by kernel.
 #[repr(transparent)]
+#[derive(PartialEq, Eq, Hash)]
 pub struct Vec<T> {
     inner: KVec<T>,
 }
@@ -266,6 +268,17 @@ impl<T> Extend<T> for Vec<T> {
         let (size, _) = iter.size_hint();
         self.reserve(size);
         for item in iter {
+            self.push(item);
+        }
+    }
+}
+
+impl<'a, T: Copy + 'a> Extend<&'a T> for Vec<T> {
+    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+        let iter = iter.into_iter();
+        let (size, _) = iter.size_hint();
+        self.reserve(size);
+        for &item in iter {
             self.push(item);
         }
     }
@@ -372,7 +385,7 @@ where
     where
         S: serde::Serializer,
     {
-        serializer.collect_seq(self.inner)
+        serializer.collect_seq(self)
     }
 }
 
@@ -417,6 +430,456 @@ where
             marker: PhantomData,
         };
         deserializer.deserialize_seq(visitor)
+    }
+}
+
+/// Wrap `hashbrown::HashMap` to impl serde trait.
+#[derive(Clone, Debug)]
+pub struct HashMap<K, V> {
+    inner: hashbrown::HashMap<K, V>,
+}
+
+impl<K, V> HashMap<K, V> {
+    /// Creates an empty `HashMap`.
+    pub fn new() -> Self {
+        Self {
+            inner: hashbrown::HashMap::new(),
+        }
+    }
+
+    /// Creates an empty `HashMap` with the specified capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: hashbrown::HashMap::with_capacity(capacity),
+        }
+    }
+}
+
+impl<K, V> Deref for HashMap<K, V> {
+    type Target = hashbrown::HashMap<K, V>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<K, V> DerefMut for HashMap<K, V> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<K, V> PartialEq for HashMap<K, V>
+where
+    K: Eq + Hash,
+    V: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.eq(&other.inner)
+    }
+}
+
+impl<K, V> Eq for HashMap<K, V>
+where
+    K: Eq + Hash,
+    V: Eq,
+{
+}
+
+impl<K, V, const N: usize> From<[(K, V); N]> for HashMap<K, V>
+where
+    K: Eq + Hash,
+{
+    fn from(arr: [(K, V); N]) -> Self {
+        arr.into_iter().collect()
+    }
+}
+
+impl<K, V> IntoIterator for HashMap<K, V> {
+    type Item = (K, V);
+    type IntoIter = hashbrown::hash_map::IntoIter<K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a HashMap<K, V> {
+    type Item = (&'a K, &'a V);
+    type IntoIter = hashbrown::hash_map::Iter<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a mut HashMap<K, V> {
+    type Item = (&'a K, &'a mut V);
+    type IntoIter = hashbrown::hash_map::IterMut<'a, K, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter_mut()
+    }
+}
+
+impl<K, V> FromIterator<(K, V)> for HashMap<K, V>
+where
+    K: Eq + Hash,
+{
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let iter = iter.into_iter();
+        let mut map = Self::with_capacity(iter.size_hint().0);
+        iter.for_each(|(k, v)| {
+            map.insert(k, v);
+        });
+        map
+    }
+}
+
+impl<K, V> Extend<(K, V)> for HashMap<K, V>
+where
+    K: Eq + Hash,
+{
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+        self.inner.extend(iter);
+    }
+}
+
+impl<'a, K, V> Extend<(&'a K, &'a V)> for HashMap<K, V>
+where
+    K: Eq + Hash + Copy,
+    V: Copy,
+{
+    fn extend<T: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: T) {
+        self.inner.extend(iter);
+    }
+}
+
+impl<'a, K, V> Extend<&'a (K, V)> for HashMap<K, V>
+where
+    K: Eq + Hash + Copy,
+    V: Copy,
+{
+    fn extend<T: IntoIterator<Item = &'a (K, V)>>(&mut self, iter: T) {
+        self.inner.extend(iter);
+    }
+}
+
+impl<K, V> Serialize for HashMap<K, V>
+where
+    K: Serialize + Eq + Hash,
+    V: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_map(self)
+    }
+}
+
+impl<'de, K, V> Deserialize<'de> for HashMap<K, V>
+where
+    K: Deserialize<'de> + Eq + Hash,
+    V: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct MapVisitor<K, V> {
+            marker: PhantomData<HashMap<K, V>>,
+        }
+
+        impl<'de, K, V> serde::de::Visitor<'de> for MapVisitor<K, V>
+        where
+            K: Deserialize<'de> + Eq + Hash,
+            V: Deserialize<'de>,
+        {
+            type Value = HashMap<K, V>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a HashMap")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> result::Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut values = HashMap::with_capacity(map.size_hint().unwrap_or(0));
+
+                while let Some((key, value)) = map.next_entry()? {
+                    values.insert(key, value);
+                }
+
+                Ok(values)
+            }
+        }
+
+        let visitor = MapVisitor {
+            marker: PhantomData,
+        };
+        deserializer.deserialize_map(visitor)
+    }
+}
+
+/// Wrap `hashbrown::HashMap` to impl serde trait.
+#[derive(Clone, Debug)]
+pub struct HashSet<T> {
+    inner: hashbrown::HashSet<T>,
+}
+
+impl<T> HashSet<T> {
+    /// Creates an empty `HashSet`.
+    pub fn new() -> Self {
+        Self {
+            inner: hashbrown::HashSet::new(),
+        }
+    }
+
+    /// Creates an empty `HashSet` with the specified capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: hashbrown::HashSet::with_capacity(capacity),
+        }
+    }
+}
+
+impl<T> Deref for HashSet<T> {
+    type Target = hashbrown::HashSet<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<T> DerefMut for HashSet<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+impl<T> PartialEq for HashSet<T>
+where
+    T: Eq + Hash,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.eq(&other.inner)
+    }
+}
+
+impl<T> Eq for HashSet<T> where T: Eq + Hash {}
+
+impl<T> FromIterator<T> for HashSet<T>
+where
+    T: Eq + Hash,
+{
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut set = Self::with_capacity(iter.size_hint().0);
+        iter.for_each(|t| {
+            set.insert(t);
+        });
+        set
+    }
+}
+
+impl<T, const N: usize> From<[T; N]> for HashSet<T>
+where
+    T: Eq + Hash,
+{
+    fn from(arr: [T; N]) -> Self {
+        arr.into_iter().collect()
+    }
+}
+
+impl<T> Extend<T> for HashSet<T>
+where
+    T: Eq + Hash,
+{
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.inner.extend(iter);
+    }
+}
+
+impl<'a, T> Extend<&'a T> for HashSet<T>
+where
+    T: 'a + Eq + Hash + Copy,
+{
+    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+        self.inner.extend(iter);
+    }
+}
+
+impl<'a, T> IntoIterator for &'a HashSet<T> {
+    type Item = &'a T;
+    type IntoIter = hashbrown::hash_set::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.iter()
+    }
+}
+
+impl<T> IntoIterator for HashSet<T> {
+    type Item = T;
+    type IntoIter = hashbrown::hash_set::IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+impl<T> Serialize for HashSet<T>
+where
+    T: Serialize + Eq + Hash,
+{
+    fn serialize<S>(&self, serializer: S) -> result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.collect_seq(self)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for HashSet<T>
+where
+    T: Deserialize<'de> + Eq + Hash,
+{
+    fn deserialize<D>(deserializer: D) -> result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct SeqVisitor<T> {
+            marker: PhantomData<HashSet<T>>,
+        }
+
+        impl<'de, T> serde::de::Visitor<'de> for SeqVisitor<T>
+        where
+            T: Deserialize<'de> + Eq + Hash,
+        {
+            type Value = HashSet<T>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a HashSet")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> result::Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut values = HashSet::with_capacity(seq.size_hint().unwrap_or(0));
+
+                while let Some(value) = seq.next_element()? {
+                    values.insert(value);
+                }
+
+                Ok(values)
+            }
+        }
+
+        let visitor = SeqVisitor {
+            marker: PhantomData,
+        };
+        deserializer.deserialize_seq(visitor)
+    }
+}
+
+/// An owned string that is guaranteed to have exactly one `NUL` byte, which is at the end.
+///
+/// Used for interoperability with kernel APIs that take C strings.
+///
+/// # Invariants
+///
+/// The string is always `NUL`-terminated and contains no other `NUL` bytes.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CString {
+    buf: Vec<u8>,
+}
+
+pub type String = CString;
+
+/// A trait for converting a value to a `String`.
+pub trait ToString {
+    /// Converts the given value to a `String`.
+    fn to_string(&self) -> String;
+}
+
+impl CString {
+    /// Returns the length of this string excluding `NUL`.
+    pub fn len(&self) -> usize {
+        self.len_with_nul() - 1
+    }
+
+    /// Returns the length of this string with `NUL`.
+    pub fn len_with_nul(&self) -> usize {
+        // SAFETY: This is one of the invariant of `CStr`.
+        // We add a `unreachable_unchecked` here to hint the optimizer that
+        // the value returned from this function is non-zero.
+        if self.buf.is_empty() {
+            unsafe { core::hint::unreachable_unchecked() };
+        }
+        self.buf.len()
+    }
+
+    /// Returns `true` if the string only includes `NUL`.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Convert the string to a byte slice without the trailing 0 byte.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.buf[..self.len()]
+    }
+
+    /// Convert the string to a byte slice containing the trailing 0 byte.
+    pub fn as_bytes_with_nul(&self) -> &[u8] {
+        &self.buf
+    }
+
+    /// Yields a `&str` slice if `CString` contains valid UTF-8.
+    ///
+    /// If the contents of the `CString` are valid UTF-8 data, this
+    /// function will return the corresponding [`&str`] slice. Otherwise,
+    /// it will return an error with details of where UTF-8 validation failed.
+    pub fn to_str(&self) -> result::Result<&str, core::str::Utf8Error> {
+        core::str::from_utf8(self.as_bytes())
+    }
+}
+
+impl Deref for CString {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.to_str().expect("it contains invalid UTF-8 bytes")
+    }
+}
+
+impl From<&str> for CString {
+    /// Creates a `CString` from a `str`.
+    ///
+    /// The str must NOT contain any interior `NUL` bytes.
+    fn from(value: &str) -> Self {
+        let bytes = value.as_bytes();
+        let mut buf = Vec::with_capacity(bytes.len() + 1);
+        let mut i = 0;
+
+        // Check if the `str` has interior `NUL` bytes.
+        while i < bytes.len() {
+            if bytes[i] == 0 {
+                panic!("the str has interior `NUL` bytes");
+            }
+            buf.push(bytes[i]);
+            i += 1;
+        }
+        buf.push(0);
+
+        Self { buf }
+    }
+}
+
+impl ToString for &str {
+    fn to_string(&self) -> String {
+        String::from(*self)
     }
 }
 

@@ -16,6 +16,7 @@ use crate::{
 /// Reuse implementations in `alloc` crate.
 pub use alloc::{
     boxed::Box,
+    string::{String, ToString},
     sync::{Arc, Weak},
     vec::Vec,
 };

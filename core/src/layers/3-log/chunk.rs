@@ -304,16 +304,16 @@ impl ChunkAllocEdit {
     /// is previously recorded in the edit as being allocated.
     /// If so, the chunk can be deallocated in the `ChunkAllocState`.
     pub fn dealloc(&mut self, chunk_id: ChunkId) -> bool {
-        match self.edit_table.get(&chunk_id).to_owned() {
+        match self.edit_table.get(&chunk_id) {
             None => {
                 self.edit_table.insert(chunk_id, ChunkEdit::Dealloc);
                 false
             }
-            Some(ChunkEdit::Alloc) => {
+            Some(&ChunkEdit::Alloc) => {
                 self.edit_table.remove(&chunk_id);
                 true
             }
-            Some(ChunkEdit::Dealloc) => {
+            Some(&ChunkEdit::Dealloc) => {
                 panic!("a chunk must not be deallocated twice");
             }
         }
