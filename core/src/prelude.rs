@@ -1,6 +1,6 @@
 pub(crate) use crate::error::{Errno::*, Error};
 pub(crate) use crate::layers::bio::{BlockId, BLOCK_SIZE};
-pub(crate) use crate::os::{Arc, Box, Vec, Weak};
+pub(crate) use crate::os::{Arc, Box, String, ToString, Vec, Weak};
 pub(crate) use crate::util::{
     align_down, align_up, Aead as _, RandomInit, Rng as _, Skcipher as _,
 };
