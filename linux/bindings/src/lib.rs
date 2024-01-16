@@ -27,6 +27,7 @@
 #![feature(allocator_api)]
 #![feature(coerce_unsized)]
 #![feature(dispatch_from_dyn)]
+#![feature(layout_for_ptr)]
 #![feature(receiver_trait)]
 #![feature(unsize)]
 

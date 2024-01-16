@@ -6,7 +6,7 @@
 
 use alloc::boxed::Box;
 use core::{
-    alloc::AllocError,
+    alloc::{AllocError, Allocator, Layout},
     fmt,
     marker::{PhantomData, Unsize},
     mem::MaybeUninit,
@@ -466,7 +466,11 @@ impl<T: ?Sized> Drop for Weak<T> {
         // Weak count reached zero, we must free the memory.
         //
         // The pointer was initialized from the result of `Box::leak`.
-        unsafe { drop(Box::from_raw(self.ptr.as_ptr())) };
+        unsafe {
+            let arc_inner = Box::from_raw(self.ptr.as_ptr());
+            let (leaked, alloc) = Box::into_raw_with_allocator(arc_inner);
+            alloc.deallocate(self.ptr.cast(), Layout::for_value_raw(self.ptr.as_ptr()));
+        };
     }
 }
 
