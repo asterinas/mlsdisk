@@ -1,0 +1,61 @@
+diff --git a/src/array_queue.rs b/src/array_queue.rs
+index 3f6d195..9ddf17a 100644
+--- a/src/array_queue.rs
++++ b/src/array_queue.rs
+@@ -104,15 +104,17 @@ impl<T> ArrayQueue<T> {
+ 
+         // Allocate a buffer of `cap` slots initialized
+         // with stamps.
+-        let buffer: Box<[Slot<T>]> = (0..cap)
+-            .map(|i| {
++        let mut buffer: Box<[MaybeUninit<Slot<T>>]> = Box::try_new_uninit_slice(cap).unwrap();
++        let buffer: Box<[Slot<T>]> = unsafe {
++            (0..cap).for_each(|i| {
+                 // Set the stamp to `{ lap: 0, index: i }`.
+-                Slot {
++                buffer[i].as_mut_ptr().write(Slot {
+                     stamp: AtomicUsize::new(i),
+                     value: UnsafeCell::new(MaybeUninit::uninit()),
+-                }
+-            })
+-            .collect();
++                });
++            });
++            buffer.assume_init()
++        };
+ 
+         // One lap is the smallest power of two greater than `cap`.
+         let one_lap = (cap + 1).next_power_of_two();
+diff --git a/src/lib.rs b/src/lib.rs
+index 4d95f54..2669bdf 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -5,6 +5,9 @@
+ //! * [`ArrayQueue`], a bounded MPMC queue that allocates a fixed-capacity buffer on construction.
+ //! * [`SegQueue`], an unbounded MPMC queue that allocates small buffers, segments, on demand.
+ 
++#![feature(allocator_api)]
++#![feature(new_uninit)]
++
+ #![doc(test(
+     no_crate_inject,
+     attr(
+diff --git a/src/seg_queue.rs b/src/seg_queue.rs
+index 973a77f..4b6408e 100644
+--- a/src/seg_queue.rs
++++ b/src/seg_queue.rs
+@@ -209,12 +209,12 @@ impl<T> SegQueue<T> {
+             // If we're going to have to install the next block, allocate it in advance in order to
+             // make the wait for other threads as short as possible.
+             if offset + 1 == BLOCK_CAP && next_block.is_none() {
+-                next_block = Some(Box::new(Block::<T>::new()));
++                next_block = Some(Box::try_new(Block::<T>::new()).unwrap());
+             }
+ 
+             // If this is the first push operation, we need to allocate the first block.
+             if block.is_null() {
+-                let new = Box::into_raw(Box::new(Block::<T>::new()));
++                let new = Box::into_raw(Box::try_new(Block::<T>::new()).unwrap());
+ 
+                 if self
+                     .tail
