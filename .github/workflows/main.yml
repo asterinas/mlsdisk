@@ -20,8 +20,7 @@ jobs:
       run: cargo fmt -- --check
 
     - name: Build system
-      run: rustup default nightly;
-          cargo build --verbose
+      run: cargo build --verbose
 
     - name: Run tests
       run: cargo test --verbose
