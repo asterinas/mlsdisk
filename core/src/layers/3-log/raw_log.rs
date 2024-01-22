@@ -441,7 +441,9 @@ impl<'a, D: BlockSet> RawLogRef<'a, D> {
         let disk = &self.log_store.disk;
         // Read from the head if possible and necessary
         let head_opt = &self.log_head;
-        if let Some(head) = head_opt && pos < head_len {
+        if let Some(head) = head_opt
+            && pos < head_len
+        {
             let num_read = nblocks.min(head_len - pos);
 
             let read_buf = BufMut::try_from(&mut buf_slice[..num_read * BLOCK_SIZE])?;
@@ -454,7 +456,9 @@ impl<'a, D: BlockSet> RawLogRef<'a, D> {
 
         // Read from the tail if possible and necessary
         let tail_opt = &self.log_tail;
-        if let Some(tail) = tail_opt && pos >= head_len {
+        if let Some(tail) = tail_opt
+            && pos >= head_len
+        {
             let num_read = nblocks.min(total_len - pos);
             let read_buf = BufMut::try_from(&mut buf_slice[..num_read * BLOCK_SIZE])?;
 
