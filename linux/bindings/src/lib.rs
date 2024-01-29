@@ -26,10 +26,20 @@
 )]
 #![feature(allocator_api)]
 #![feature(coerce_unsized)]
+#![feature(core_intrinsics)]
 #![feature(dispatch_from_dyn)]
+#![feature(error_in_core)]
+#![feature(exclusive_range_pattern)]
+#![feature(extend_one)]
+#![feature(hasher_prefixfree_extras)]
+#![feature(inline_const)]
 #![feature(layout_for_ptr)]
+#![feature(maybe_uninit_slice)]
+#![feature(new_uninit)]
 #![feature(offset_of)]
 #![feature(receiver_trait)]
+#![feature(slice_ptr_get)]
+#![feature(specialization)]
 #![feature(unsize)]
 
 mod bindings_raw {
@@ -49,6 +59,8 @@ mod bindings_helper {
     include!("./bindings_helpers_generated.rs");
 }
 
+// Vendor for `alloc::collections::btree`.
+pub mod btree;
 pub mod crypto;
 pub mod sync;
 pub mod thread;
