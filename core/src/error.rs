@@ -72,6 +72,6 @@ macro_rules! return_errno {
 #[macro_export]
 macro_rules! return_errno_with_msg {
     ($errno: expr, $msg: expr) => {
-        return core::result::Result::Err(crate::error::Error::with_msg($errno, $msg))
+        return core::result::Result::Err(crate::Error::with_msg($errno, $msg))
     };
 }
