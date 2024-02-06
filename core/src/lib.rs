@@ -1,5 +1,6 @@
 // #![no_std]
 #![feature(allocator_api)]
+#![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(coerce_unsized)]
 #![feature(dispatch_from_dyn)]
 #![feature(fn_traits)]
@@ -22,3 +23,7 @@ mod tx;
 mod util;
 
 extern crate alloc;
+
+pub use self::error::{Errno, Error};
+pub use self::layers::bio::{BlockId, BlockSet, Buf, BufMut, BufRef, BLOCK_SIZE};
+pub use self::layers::disk::SwornDisk;
