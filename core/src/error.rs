@@ -1,4 +1,4 @@
-/// The error type which is returned from the APIs of this crate.
+/// The error types used in this crate.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Errno {
     /// Transaction aborted.
@@ -15,6 +15,8 @@ pub enum Errno {
     IoFailed,
     /// Permission denied.
     PermissionDenied,
+    /// Unsupported.
+    Unsupported,
     /// OS-specific unknown error.
     OsSpecUnknown,
     /// Encryption operation failed.
@@ -23,24 +25,24 @@ pub enum Errno {
     DecryptFailed,
     /// Not aligned to `BLOCK_SIZE`.
     NotBlockSizeAligned,
-    /// RwLock try_read failed.
-    TryReadFailed,
-    /// RwLock try_write failed.
-    TryWriteFailed,
+    /// Try lock failed.
+    TryLockFailed,
 }
 
-/// error used in this crate
-#[derive(Debug, Clone)]
+/// The error with an error type and an error message used in this crate.
+#[derive(Clone, Debug)]
 pub struct Error {
     errno: Errno,
     msg: Option<&'static str>,
 }
 
 impl Error {
+    /// Creates a new error with the given error type and no error message.
     pub const fn new(errno: Errno) -> Self {
         Error { errno, msg: None }
     }
 
+    /// Creates a new error with the given error type and the error message.
     pub const fn with_msg(errno: Errno, msg: &'static str) -> Self {
         Error {
             errno,
@@ -48,6 +50,7 @@ impl Error {
         }
     }
 
+    /// Returns the error type.
     pub fn errno(&self) -> Errno {
         self.errno
     }
