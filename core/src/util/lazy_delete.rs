@@ -2,6 +2,8 @@ use core::fmt;
 use core::ops::{Deref, DerefMut};
 use core::sync::atomic::{AtomicBool, Ordering};
 
+use crate::os::Box;
+
 /// An object that may be deleted lazily.
 ///
 /// Lazy-deletion is a technique to postpone the real deletion of an object.

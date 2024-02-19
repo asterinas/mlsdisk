@@ -12,7 +12,7 @@ use super::sstable::SSTable;
 use super::wal::{WalAppendTx, BUCKET_WAL};
 use crate::layers::bio::BlockSet;
 use crate::layers::log::{TxLogId, TxLogStore};
-use crate::os::{BTreeMap, RwLock};
+use crate::os::{spawn, BTreeMap, RwLock};
 use crate::prelude::*;
 use crate::tx::Tx;
 
@@ -20,9 +20,6 @@ use core::hash::Hash;
 use core::ops::{Add, RangeInclusive, Sub};
 use core::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use pod::Pod;
-
-// TODO: Use `Thread` in os module
-use std::thread;
 
 // XXX: Master sync ID should be stored in external trusted storage
 pub static MASTER_SYNC_ID: AtomicU64 = AtomicU64::new(0);
@@ -197,7 +194,7 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TxLsmTree<K, V, D> 
     /// Do a compaction TX.
     fn do_compaction_tx(&self) -> Result<()> {
         let inner = self.0.clone();
-        let handle = thread::spawn(move || -> Result<()> {
+        let handle = spawn(move || -> Result<()> {
             // Do major compaction first if necessary
             if inner
                 .sst_manager

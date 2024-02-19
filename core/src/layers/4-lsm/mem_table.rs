@@ -4,15 +4,15 @@ use crate::os::{BTreeMap, Mutex, RwLock, RwLockReadGuard};
 use crate::prelude::*;
 
 // TODO: Put them into os module
-use std::sync::{Condvar, Mutex as StdMutex};
+// use std::sync::{Condvar, Mutex as StdMutex};
 
 /// Manager for an active `MemTable` and an immutable `MemTable`
 /// in a `TxLsmTree`.
 pub(super) struct MemTableManager<K: RecordKey<K>, V> {
     active: Mutex<MemTable<K, V>>,
     immutable: RwLock<MemTable<K, V>>, // Read-only most of the time
-    cvar: Condvar,
-    state: StdMutex<TableState>,
+                                       // cvar: Condvar,
+                                       // state: StdMutex<TableState>,
 }
 
 /// MemTable for LSM-Tree.
@@ -67,8 +67,8 @@ impl<K: RecordKey<K>, V: RecordValue> MemTableManager<K, V> {
         Self {
             active,
             immutable,
-            cvar: Condvar::new(),
-            state: StdMutex::new(TableState::Vacant),
+            // cvar: Condvar::new(),
+            // state: StdMutex::new(TableState::Vacant),
         }
     }
 
@@ -98,19 +98,19 @@ impl<K: RecordKey<K>, V: RecordValue> MemTableManager<K, V> {
     /// Puts a key-value pair into the active `MemTable`, and
     /// return whether the active `MemTable` is full.
     pub fn put(&self, key: K, value: V) -> bool {
-        let mut state = self.state.lock().unwrap();
-        while *state != TableState::Vacant {
-            state = self.cvar.wait(state).unwrap();
-        }
-        debug_assert_eq!(*state, TableState::Vacant);
+        // let mut state = self.state.lock().unwrap();
+        // while *state != TableState::Vacant {
+        //     state = self.cvar.wait(state).unwrap();
+        // }
+        // debug_assert_eq!(*state, TableState::Vacant);
 
         let mut active = self.active.lock();
         let _ = active.put(key, value);
 
         let is_full = active.at_capacity();
-        if is_full {
-            *state = TableState::Full;
-        }
+        // if is_full {
+        //     *state = TableState::Full;
+        // }
         is_full
     }
 
@@ -123,8 +123,8 @@ impl<K: RecordKey<K>, V: RecordValue> MemTableManager<K, V> {
     /// the active `MemTable` becomes full and the immutable `MemTable` is
     /// ready to be cleared.
     pub fn switch(&self) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
-        debug_assert_eq!(*state, TableState::Full);
+        // let mut state = self.state.lock().unwrap();
+        // debug_assert_eq!(*state, TableState::Full);
 
         let mut active = self.active.lock();
         let sync_id = active.sync_id();
@@ -138,8 +138,8 @@ impl<K: RecordKey<K>, V: RecordValue> MemTableManager<K, V> {
         // Update sync ID of the switched active `MemTable`
         active.sync(sync_id)?;
 
-        *state = TableState::Vacant;
-        self.cvar.notify_all();
+        // *state = TableState::Vacant;
+        // self.cvar.notify_all();
         Ok(())
     }
 

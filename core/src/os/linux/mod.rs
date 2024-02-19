@@ -10,8 +10,9 @@ use bindings::{
 };
 use core::{
     any::Any,
+    borrow::Borrow,
     fmt,
-    hash::Hash,
+    hash::{Hash, Hasher},
     marker::{PhantomData, Tuple, Unsize},
     ops::{CoerceUnsized, Deref, DerefMut, DispatchFromDyn, Receiver},
     pin::Pin,
@@ -31,6 +32,9 @@ use crate::{
     error::Errno,
     prelude::{Error, Result},
 };
+
+/// Reuse `BTreeMap` in `bindings` crate.
+pub use bindings::btree::map::BTreeMap;
 
 /// Reuse `spawn` and `JoinHandle` in `bindings::thread`.
 pub use bindings::thread::{spawn, JoinHandle, Thread};
@@ -794,7 +798,7 @@ where
 /// # Invariants
 ///
 /// The string is always `NUL`-terminated and contains no other `NUL` bytes.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CString {
     buf: Vec<u8>,
 }
@@ -883,6 +887,38 @@ impl From<&str> for CString {
 impl ToString for &str {
     fn to_string(&self) -> String {
         String::from(*self)
+    }
+}
+
+impl Borrow<str> for CString {
+    fn borrow(&self) -> &str {
+        self.to_str().unwrap()
+    }
+}
+
+impl Hash for String {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        (**self).hash(hasher)
+    }
+}
+
+impl<'a> PartialEq<&'a str> for CString {
+    fn eq(&self, other: &&'a str) -> bool {
+        PartialEq::eq(&self.to_str().unwrap(), other)
+    }
+
+    fn ne(&self, other: &&'a str) -> bool {
+        PartialEq::ne(&self.to_str().unwrap(), other)
+    }
+}
+
+impl<'a> PartialEq<CString> for &'a str {
+    fn eq(&self, other: &CString) -> bool {
+        PartialEq::eq(self, &other.to_str().unwrap())
+    }
+
+    fn ne(&self, other: &CString) -> bool {
+        PartialEq::ne(self, &other.to_str().unwrap())
     }
 }
 
@@ -1036,6 +1072,12 @@ impl<T> Mutex<T> {
     /// Acquires the lock and gives the caller access to the data protected by it.
     pub fn lock(&self) -> MutexGuard<'_, T> {
         self.inner.lock()
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Mutex<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("No data, since `Mutex` does't support `try_lock` now")
     }
 }
 

@@ -5,13 +5,10 @@ use super::tx_lsm_tree::SSTABLE_CAPACITY;
 use super::{LsmLevel, RecordKey, RecordValue, SyncID, TxEventListener};
 use crate::layers::bio::BlockSet;
 use crate::layers::log::TxLogStore;
-use crate::os::Mutex;
+use crate::os::{JoinHandle, Mutex};
 use crate::prelude::*;
 
 use core::marker::PhantomData;
-
-// TODO: Use `Thread` in os module
-use std::thread::JoinHandle;
 
 /// A `Compactor` is currently used for asynchronous compaction
 /// and specific compaction algorithm of `TxLsmTree`.
