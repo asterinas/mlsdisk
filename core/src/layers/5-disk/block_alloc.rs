@@ -2,7 +2,7 @@
 use super::sworndisk::Hba;
 use crate::layers::bio::{BlockSet, Buf, BufRef, BID_SIZE};
 use crate::layers::log::{TxLog, TxLogStore};
-use crate::os::{HashMap, Mutex};
+use crate::os::{BTreeMap, Mutex};
 use crate::prelude::*;
 use crate::util::BitMap;
 
@@ -27,7 +27,7 @@ pub(super) struct AllocTable {
 /// `TxLog`s of bucket `BAL` during TX for durability and recovery purpose.
 pub(super) struct BlockAlloc<D> {
     alloc_table: Arc<AllocTable>, // Point to the global allocator
-    diff_table: Mutex<HashMap<Hba, AllocDiff>>, // Per-TX diffs of block validity
+    diff_table: Mutex<BTreeMap<Hba, AllocDiff>>, // Per-TX diffs of block validity
     store: Arc<TxLogStore<D>>,    // Store for diff log from L3
     diff_log: Mutex<Option<Arc<TxLog<D>>>>, // Opened diff log (currently not in-use)
 }
@@ -221,7 +221,7 @@ impl<D: BlockSet + 'static> BlockAlloc<D> {
     pub fn new(alloc_table: Arc<AllocTable>, store: Arc<TxLogStore<D>>) -> Self {
         Self {
             alloc_table,
-            diff_table: Mutex::new(HashMap::new()),
+            diff_table: Mutex::new(BTreeMap::new()),
             store,
             diff_log: Mutex::new(None),
         }
@@ -270,6 +270,7 @@ impl<D: BlockSet + 'static> BlockAlloc<D> {
             return Ok(());
         }
 
+        // FIXME: diff_buf.extend_from_slice will panic in linux kernel.
         let mut diff_buf = Vec::with_capacity(BLOCK_SIZE);
         for (block_id, block_diff) in diff_table.iter() {
             diff_buf.push(*block_diff as u8);

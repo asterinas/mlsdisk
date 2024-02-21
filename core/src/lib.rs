@@ -9,8 +9,10 @@
 #![feature(negative_impls)]
 #![feature(new_uninit)]
 #![feature(receiver_trait)]
+#![feature(sized_type_properties)]
 #![feature(slice_concat_trait)]
 #![feature(slice_group_by)]
+#![feature(slice_internals)]
 #![feature(tuple_trait)]
 #![feature(unboxed_closures)]
 #![feature(unsize)]
@@ -28,4 +30,4 @@ pub use self::error::{Errno, Error};
 pub use self::layers::bio::{BlockId, BlockSet, Buf, BufMut, BufRef, BLOCK_SIZE};
 pub use self::layers::disk::SwornDisk;
 #[cfg(feature = "linux")]
-pub use os::{Arc, Mutex, Vec};
+pub use os::{AeadKey, Arc, Mutex, Vec};

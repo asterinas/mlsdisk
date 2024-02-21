@@ -7,15 +7,15 @@ use crate::prelude::*;
 use core::ops::RangeInclusive;
 
 // TODO: Put them into os module
-use std::sync::{Condvar, Mutex as StdMutex};
+// use std::sync::{Condvar, Mutex as StdMutex};
 
 /// A buffer to cache data blocks before they are written to disk.
 #[derive(Debug)]
 pub(super) struct DataBuf {
     buf: Mutex<BTreeMap<RecordKey, Arc<DataBlock>>>,
     cap: usize,
-    cvar: Condvar,
-    state: StdMutex<BufState>,
+    //    cvar: Condvar,
+    //    state: StdMutex<BufState>,
 }
 
 /// User data block.
@@ -38,8 +38,8 @@ impl DataBuf {
         Self {
             buf: Mutex::new(BTreeMap::new()),
             cap,
-            cvar: Condvar::new(),
-            state: StdMutex::new(BufState::Vacant),
+            // cvar: Condvar::new(),
+            // state: StdMutex::new(BufState::Vacant),
         }
     }
 
@@ -75,19 +75,19 @@ impl DataBuf {
     pub fn put(&self, key: RecordKey, buf: BufRef) -> bool {
         debug_assert_eq!(buf.nblocks(), 1);
 
-        let mut state = self.state.lock().unwrap();
-        while *state != BufState::Vacant {
-            state = self.cvar.wait(state).unwrap();
-        }
-        debug_assert_eq!(*state, BufState::Vacant);
+        // let mut state = self.state.lock().unwrap();
+        // while *state != BufState::Vacant {
+        //     state = self.cvar.wait(state).unwrap();
+        // }
+        // debug_assert_eq!(*state, BufState::Vacant);
 
         let mut data_buf = self.buf.lock();
         let _ = data_buf.insert(key, DataBlock::from_buf(buf));
 
         let is_full = data_buf.len() >= self.cap;
-        if is_full {
-            *state = BufState::Full;
-        }
+        // if is_full {
+        //     *state = BufState::Full;
+        // }
         is_full
     }
 
@@ -108,13 +108,13 @@ impl DataBuf {
 
     /// Empty the buffer.
     pub fn clear(&self) {
-        let mut state = self.state.lock().unwrap();
-        debug_assert_eq!(*state, BufState::Full);
+        // let mut state = self.state.lock().unwrap();
+        // debug_assert_eq!(*state, BufState::Full);
 
         self.buf.lock().clear();
 
-        *state = BufState::Vacant;
-        self.cvar.notify_all();
+        // *state = BufState::Vacant;
+        // self.cvar.notify_all();
     }
 
     /// Return all the buffered data blocks.

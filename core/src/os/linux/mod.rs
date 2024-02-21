@@ -1,7 +1,10 @@
 //! Linux specific implementations.
 
-use alloc::boxed::Box as KBox;
-use alloc::vec::Vec as KVec;
+use alloc::{
+    alloc::{alloc, dealloc, AllocError, Layout},
+    boxed::Box as KBox,
+    vec::Vec as KVec,
+};
 use bindings::{
     new_rwlock,
     sync::lock::rwlock::{Read, RwLockBackend, Write},
@@ -11,13 +14,16 @@ use bindings::{
 use core::{
     any::Any,
     borrow::Borrow,
+    cmp::Ordering,
     fmt,
     hash::{Hash, Hasher},
     marker::{PhantomData, Tuple, Unsize},
+    mem::SizedTypeProperties,
     ops::{CoerceUnsized, Deref, DerefMut, DispatchFromDyn, Receiver},
     pin::Pin,
     ptr::NonNull,
     result, slice,
+    slice::sort::{merge_sort, TimSortRun},
 };
 use kernel::{
     c_str, current,
@@ -168,7 +174,7 @@ impl<T> InPlaceInit<T> for Box<T> {
     #[inline]
     fn try_pin_init<E>(init: impl PinInit<T, E>) -> result::Result<Pin<Self>, E>
     where
-        E: From<alloc::alloc::AllocError>,
+        E: From<AllocError>,
     {
         let mut inner = KBox::try_new_uninit()?;
         let slot = inner.as_mut_ptr();
@@ -185,7 +191,7 @@ impl<T> InPlaceInit<T> for Box<T> {
     #[inline]
     fn try_init<E>(init: impl Init<T, E>) -> result::Result<Self, E>
     where
-        E: From<alloc::alloc::AllocError>,
+        E: From<AllocError>,
     {
         let mut inner = KBox::try_new_uninit()?;
         let slot = inner.as_mut_ptr();
@@ -437,6 +443,79 @@ where
             marker: PhantomData,
         };
         deserializer.deserialize_seq(visitor)
+    }
+}
+
+/// Revised standard implementation from `alloc/slice.rs`.
+fn stable_sort<T, F>(v: &mut [T], mut is_less: F)
+where
+    F: FnMut(&T, &T) -> bool,
+{
+    if T::IS_ZST {
+        // Sorting has no meaningful behavior on zero-sized types. Do nothing.
+        return;
+    }
+
+    let elem_alloc_fn = |len: usize| -> *mut T {
+        // SAFETY: Creating the layout is safe as long as merge_sort never calls this with len >
+        // v.len(). Alloc in general will only be used as 'shadow-region' to store temporary swap
+        // elements.
+        unsafe { alloc(Layout::array::<T>(len).unwrap_unchecked()) as *mut T }
+    };
+
+    let elem_dealloc_fn = |buf_ptr: *mut T, len: usize| {
+        // SAFETY: Creating the layout is safe as long as merge_sort never calls this with len >
+        // v.len(). The caller must ensure that buf_ptr was created by elem_alloc_fn with the same
+        // len.
+        unsafe {
+            dealloc(
+                buf_ptr as *mut u8,
+                Layout::array::<T>(len).unwrap_unchecked(),
+            );
+        }
+    };
+
+    let run_alloc_fn = |len: usize| -> *mut TimSortRun {
+        // SAFETY: Creating the layout is safe as long as merge_sort never calls this with an
+        // obscene length or 0.
+        unsafe { alloc(Layout::array::<TimSortRun>(len).unwrap_unchecked()) as *mut TimSortRun }
+    };
+
+    let run_dealloc_fn = |buf_ptr: *mut TimSortRun, len: usize| {
+        // SAFETY: The caller must ensure that buf_ptr was created by elem_alloc_fn with the same
+        // len.
+        unsafe {
+            dealloc(
+                buf_ptr as *mut u8,
+                Layout::array::<TimSortRun>(len).unwrap_unchecked(),
+            );
+        }
+    };
+
+    merge_sort(
+        v,
+        &mut is_less,
+        elem_alloc_fn,
+        elem_dealloc_fn,
+        run_alloc_fn,
+        run_dealloc_fn,
+    );
+}
+
+impl<T: Ord> Vec<T> {
+    /// Sorts the slice.
+    pub fn sort(&mut self) {
+        stable_sort(self.as_mut_slice(), T::lt);
+    }
+}
+
+impl<T> Vec<T> {
+    /// Sorts the slice with a comparator function.
+    pub fn sort_by<F>(&mut self, mut compare: F)
+    where
+        F: FnMut(&T, &T) -> Ordering,
+    {
+        stable_sort(self.as_mut_slice(), |a, b| compare(a, b) == Ordering::Less);
     }
 }
 
@@ -1130,6 +1209,21 @@ impl<T> RwLock<T> {
     }
 }
 
+impl<T: fmt::Debug> fmt::Debug for RwLock<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut d = f.debug_struct("RwLock");
+        match self.try_read() {
+            Ok(guard) => {
+                d.field("data", &&*guard);
+            }
+            Err(_) => {
+                d.field("data", &format_args!("<locked>"));
+            }
+        }
+        d.finish_non_exhaustive()
+    }
+}
+
 /// Reuse `RwLockReadGuard` provided by kernel.
 pub type RwLockReadGuard<'a, T> = bindings::sync::lock::Guard<'a, T, RwLockBackend<Read>>;
 
@@ -1172,9 +1266,8 @@ impl PageAllocator {
         // SAFETY: the `count` is non-zero, then the `Layout` has
         // non-zero size, so it's safe.
         unsafe {
-            let layout =
-                alloc::alloc::Layout::from_size_align_unchecked(len * PAGE_SIZE, PAGE_SIZE);
-            let ptr = alloc::alloc::alloc(layout);
+            let layout = Layout::from_size_align_unchecked(len * PAGE_SIZE, PAGE_SIZE);
+            let ptr = alloc(layout);
             NonNull::new(ptr)
         }
     }
@@ -1192,9 +1285,8 @@ impl PageAllocator {
     unsafe fn dealloc(ptr: *mut u8, len: usize) {
         // SAFETY: the caller should pass valid `ptr` and `len`.
         unsafe {
-            let layout =
-                alloc::alloc::Layout::from_size_align_unchecked(len * PAGE_SIZE, PAGE_SIZE);
-            alloc::alloc::dealloc(ptr, layout)
+            let layout = Layout::from_size_align_unchecked(len * PAGE_SIZE, PAGE_SIZE);
+            dealloc(ptr, layout)
         }
     }
 }

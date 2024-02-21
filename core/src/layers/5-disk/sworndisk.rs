@@ -196,7 +196,7 @@ impl<D: BlockSet + 'static> SwornDisk<D> {
     /// Spawn a task to continuously handle any queued block I/O requests.
     fn spawn_bio_req_handler(&self) {
         let inner = self.inner.clone();
-        let _ = std::thread::spawn(move || {
+        let _ = crate::os::spawn(move || {
             inner.handle_bio_reqs_looped();
         });
     }
@@ -623,7 +623,7 @@ impl<D: BlockSet + 'static> TxEventListener<RecordKey, RecordValue> for TxLsmTre
     fn on_tx_precommit(&self, tx: &mut Tx) -> Result<()> {
         match self.tx_type {
             TxType::Compaction { .. } | TxType::Migration => {
-                tx.context(|| self.block_alloc.update_diff_log().unwrap())
+                // tx.context(|| self.block_alloc.update_diff_log().unwrap())
             }
         }
         Ok(())
