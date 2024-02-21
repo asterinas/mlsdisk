@@ -28,6 +28,7 @@
 #![feature(coerce_unsized)]
 #![feature(dispatch_from_dyn)]
 #![feature(layout_for_ptr)]
+#![feature(offset_of)]
 #![feature(receiver_trait)]
 #![feature(unsize)]
 
@@ -48,6 +49,7 @@ mod bindings_helper {
     include!("./bindings_helpers_generated.rs");
 }
 
+pub mod crypto;
 pub mod sync;
 pub mod thread;
 
