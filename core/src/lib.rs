@@ -14,7 +14,7 @@
 #![feature(unboxed_closures)]
 #![feature(unsize)]
 
-mod error;
+pub mod error;
 mod layers;
 mod os;
 mod prelude;
@@ -22,3 +22,7 @@ mod tx;
 mod util;
 
 extern crate alloc;
+
+pub use layers::bio::{BlockId, BlockSet, Buf, BufMut, BufRef, BLOCK_SIZE};
+#[cfg(feature = "linux")]
+pub use os::{Arc, Mutex, Vec};
