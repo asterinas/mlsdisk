@@ -32,6 +32,9 @@ use crate::{
     prelude::{Error, Result},
 };
 
+/// Reuse `spawn` and `JoinHandle` in `bindings::thread`.
+pub use bindings::thread::{spawn, JoinHandle, Thread};
+
 /// Wrap `alloc::boxed::Box` provided by kernel.
 #[repr(transparent)]
 pub struct Box<T: ?Sized> {

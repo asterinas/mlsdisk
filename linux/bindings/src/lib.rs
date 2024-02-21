@@ -30,7 +30,24 @@
 #![feature(receiver_trait)]
 #![feature(unsize)]
 
-pub mod sync;
+mod bindings_raw {
+    // Use glob import here to expose all helpers.
+    // Symbols defined within the module will take precedence to the glob import.
+    pub use super::bindings_helper::*;
+    include!("./bindings_generated.rs");
+}
 
-include!("./bindings_generated.rs");
-include!("./bindings_helpers_generated.rs");
+// When both a directly exposed symbol and a helper exists for the same function,
+// the directly exposed symbol is preferred and the helper becomes dead code, so
+// ignore the warning here.
+#[allow(dead_code)]
+mod bindings_helper {
+    // Import the generated bindings for types.
+    use super::bindings_raw::*;
+    include!("./bindings_helpers_generated.rs");
+}
+
+pub mod sync;
+pub mod thread;
+
+pub use bindings_raw::*;

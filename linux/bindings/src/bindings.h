@@ -8,6 +8,8 @@
  * Sorted alphabetically.
  */
 
+#include <linux/delay.h>
+#include <linux/kthread.h>
 #include <linux/lockdep_types.h>
 #include <linux/refcount.h>
 #include <linux/rwsem.h>

@@ -22,6 +22,7 @@
 
 #include <linux/atomic.h>
 #include <linux/refcount.h>
+#include <linux/sched/task.h>
 
 refcount_t helper_REFCOUNT_INIT(int n)
 {
@@ -46,4 +47,14 @@ int helper_atomic_read_acquire(const atomic_t *v)
 int helper_atomic_fetch_add_release(int i, atomic_t *v)
 {
 	return atomic_fetch_add_release(i, v);
+}
+
+struct task_struct *helper_get_task_struct(struct task_struct *t)
+{
+	return get_task_struct(t);
+}
+
+void helper_put_task_struct(struct task_struct *t)
+{
+	put_task_struct(t);
 }
