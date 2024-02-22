@@ -17,8 +17,7 @@ use core::{
 use crossbeam_queue::SegQueue;
 use kernel::{c_str, new_condvar, prelude::*, sync::CondVar};
 use sworndisk::{
-    error::{self, Errno, Error},
-    return_errno_with_msg, Arc, BlockId, BlockSet, BufMut, BufRef, Mutex, Vec,
+    AeadKey, Arc, BlockId, BlockSet, Buf, BufMut, BufRef, Errno, Error, Mutex, SwornDisk, Vec,
 };
 
 use crate::bio::{Bio, BioOp, BioVec};
@@ -49,6 +48,8 @@ impl kernel::Module for TargetManager {
         // test_thread();
         // test_aead();
         // test_skcipher();
+        // test_rawdisk();
+        // test_sworndisk(10 * 1024 * 1024 * 1024);
 
         let sworndisk = Box::pin_init(TargetType::register::<DmSwornDisk>(
             c_str!("sworndisk"),
@@ -67,17 +68,16 @@ impl Drop for TargetManager {
 }
 
 /// A request queue, dispatching bios from device mapper to `RawDisk`.
-struct ReqQueue {
+struct ReqQueue<D: BlockSet> {
     bios: Mutex<SegQueue<Bio>>,
-    // TODO: replace raw disk with sworndisk.
-    disk: RawDisk,
+    disk: SwornDisk<D>,
     should_stop: AtomicBool,
     new_bio: Pin<Box<CondVar>>,
 }
 
-impl ReqQueue {
+impl<D: BlockSet + 'static> ReqQueue<D> {
     /// Constructs a `ReqQueue`.
-    pub fn new(disk: RawDisk) -> Self {
+    pub fn new(disk: SwornDisk<D>) -> Self {
         Self {
             bios: Mutex::new(SegQueue::new()),
             disk,
@@ -126,29 +126,38 @@ impl ReqQueue {
     fn handle(&self, bio: Bio) {
         if bio.start_sector() % BLOCK_SECTORS != 0 || bio.len() % BLOCK_SIZE != 0 {
             pr_warn!(
-                "bio not aligned to BLOCK_SIZE, start_sector: {}, len: {}",
+                "bio not aligned to BLOCK_SIZE, {:?}, start_sector: {}, len: {}",
+                bio.op(),
                 bio.start_sector(),
                 bio.len(),
             );
+
+            match bio.op() {
+                BioOp::Read => self.read_unaligned(&bio),
+                BioOp::Write => self.write_unaligned(&bio),
+                _ => unreachable!(),
+            }
             bio.end();
             return;
         }
 
         match bio.op() {
             BioOp::Read => {
-                let mut pos = bio.start_sector() / BLOCK_SECTORS;
-                for mut bio_vec in bio.iter() {
-                    let buf = BufMut::try_from(bio_vec.deref_mut()).unwrap();
-                    let nblocks = buf.nblocks();
-                    if let Err(err) = self.disk.read(pos, buf) {
-                        pr_info!(
-                            "read sworndisk failed, block_id: {}, nblocks: {}, err: {:?}",
-                            pos,
-                            nblocks,
-                            err,
-                        );
-                    }
-                    pos += nblocks;
+                let mut bio_vecs = Vec::new();
+                bio.iter().for_each(|bio_vec| bio_vecs.push(bio_vec));
+                let mut bufs = Vec::new();
+                bio_vecs.iter_mut().for_each(|bio_vec| {
+                    bufs.push(BufMut::try_from(bio_vec.deref_mut()).unwrap());
+                });
+
+                let start_block = bio.start_sector() / BLOCK_SECTORS;
+                if let Err(err) = self.disk.readv(start_block, &mut bufs) {
+                    pr_info!(
+                        "read sworndisk failed, block_id: {}, nblocks: {}, err: {:?}",
+                        start_block,
+                        bio.len() / BLOCK_SIZE,
+                        err,
+                    );
                 }
             }
             BioOp::Write => {
@@ -172,17 +181,85 @@ impl ReqQueue {
         bio.end();
     }
 
+    fn read_unaligned(&self, bio: &Bio) {
+        let start_bytes = bio.start_sector() * (BLOCK_SIZE / BLOCK_SECTORS);
+        let end_bytes = start_bytes + bio.len();
+
+        let start_block = start_bytes / BLOCK_SIZE;
+        let end_block = (end_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        let nblocks = end_block - start_block;
+        let mut buf = Buf::alloc(nblocks).expect("alloc read buffer failed");
+
+        if let Err(err) = self.disk.read(start_block, buf.as_mut()) {
+            pr_info!(
+                "read sworndisk failed, block_id: {}, nblocks: {}, err: {:?}",
+                start_block,
+                nblocks,
+                err,
+            );
+        }
+
+        let mut offset = start_bytes % BLOCK_SIZE;
+        for mut bio_vec in bio.iter() {
+            let vec_len = bio_vec.len();
+            bio_vec.copy_from_slice(&buf.as_slice()[offset..offset + vec_len]);
+            offset += vec_len;
+        }
+
+        if let Err(err) = self.disk.write(start_block, buf.as_ref()) {
+            pr_info!(
+                "write sworndisk failed, block_id: {}, nblocks: {}, err: {:?}",
+                start_block,
+                nblocks,
+                err,
+            );
+        }
+    }
+
+    fn write_unaligned(&self, bio: &Bio) {
+        let start_bytes = bio.start_sector() * (BLOCK_SIZE / BLOCK_SECTORS);
+        let end_bytes = start_bytes + bio.len();
+
+        let start_block = start_bytes / BLOCK_SIZE;
+        let end_block = (end_bytes + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        let nblocks = end_block - start_block;
+        let mut buf = Buf::alloc(nblocks).expect("alloc read buffer failed");
+
+        // TODO: we could only read the first and last blocks.
+        if let Err(err) = self.disk.read(start_block, buf.as_mut()) {
+            pr_info!(
+                "read sworndisk failed, block_id: {}, nblocks: {}, err: {:?}",
+                start_block,
+                nblocks,
+                err,
+            );
+        }
+
+        let mut offset = start_bytes % BLOCK_SIZE;
+        for mut bio_vec in bio.iter() {
+            let vec_len = bio_vec.len();
+            buf.as_mut_slice()[offset..offset + vec_len].copy_from_slice(bio_vec.deref());
+            offset += vec_len;
+        }
+    }
+
     /// Handles all the pending `Bio`s in the queue.
     fn clear(&self) {
         while let Some(bio) = self.bios.lock().pop() {
             self.handle(bio);
         }
     }
+
+    /// Sync the disk before handle next bio.
+    pub fn sync(&self) -> Result<(), Error> {
+        let _ = self.bios.lock();
+        self.disk.sync()
+    }
 }
 
 /// A struct represent a `dm_target` type, defines `TargetOperations`.
 struct DmSwornDisk {
-    queue: Arc<ReqQueue>,
+    queue: Arc<ReqQueue<RawDisk>>,
     handler: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -191,7 +268,7 @@ unsafe impl Sync for DmSwornDisk {}
 
 impl DmSwornDisk {
     /// Returns an in-place initializer.
-    fn new(queue: Arc<ReqQueue>, handler: JoinHandle<()>) -> impl Init<Self> {
+    fn new(queue: Arc<ReqQueue<RawDisk>>, handler: JoinHandle<()>) -> impl Init<Self> {
         init!(Self {
             queue,
             handler: Mutex::new(Some(handler))
@@ -223,7 +300,10 @@ impl RawDisk {
 impl BlockSet for RawDisk {
     fn read(&self, pos: BlockId, buf: BufMut) -> Result<(), Error> {
         if pos + buf.nblocks() > self.region.end {
-            return_errno_with_msg!(Errno::InvalidArgs, "read position is out of range");
+            return Err(Error::with_msg(
+                Errno::InvalidArgs,
+                "read position is out of range",
+            ));
         }
 
         let region = Range {
@@ -242,7 +322,10 @@ impl BlockSet for RawDisk {
 
     fn write(&self, pos: BlockId, buf: BufRef) -> Result<(), Error> {
         if pos + buf.nblocks() > self.region.end {
-            return_errno_with_msg!(Errno::InvalidArgs, "write position is out of range");
+            return Err(Error::with_msg(
+                Errno::InvalidArgs,
+                "write position is out of range",
+            ));
         }
 
         let region = Range {
@@ -266,7 +349,10 @@ impl BlockSet for RawDisk {
 
     fn subset(&self, range: Range<BlockId>) -> Result<Self, Error> {
         if self.region.start + range.end > self.region.end {
-            return_errno_with_msg!(Errno::InvalidArgs, "subset is out of range");
+            return Err(Error::with_msg(
+                Errno::InvalidArgs,
+                "subset is out of range",
+            ));
         }
 
         Ok(RawDisk {
@@ -288,19 +374,47 @@ impl TargetOperations for DmSwornDisk {
     type Private = DmSwornDisk;
 
     fn ctr(target: &mut Target<Self>, args: Args) -> Result<Box<DmSwornDisk>> {
-        // TODO: accept more arguments, e.g., root key.
-        if args.len() != 1 {
+        if args.len() != 3 {
             target.set_error(c_str!("Invalid argument count"));
             return Err(EINVAL);
         }
 
-        let Ok(raw_disk) = RawDisk::open(&args[0]) else {
+        let should_format = match args[0].to_str() {
+            Ok("create") => true,
+            Ok("open") => false,
+            _ => {
+                target.set_error(c_str!("Unsupported operation"));
+                return Err(EINVAL);
+            }
+        };
+
+        let Ok(raw_disk) = RawDisk::open(&args[1]) else {
             target.set_error(c_str!("Device lookup failed"));
             return Err(ENODEV);
         };
 
-        // TODO: use raw_disk to construct a sworndisk instance.
-        let queue = Arc::new(ReqQueue::new(raw_disk));
+        let mut root_key = AeadKey::default();
+        let err = unsafe {
+            bindings::hex2bin(root_key.as_mut_ptr(), args[2].as_char_ptr(), root_key.len())
+        };
+        if err != 0 {
+            target.set_error(c_str!("Invalid root key"));
+            return Err(EINVAL);
+        }
+
+        let sworndisk = match should_format {
+            true => SwornDisk::create(raw_disk, root_key).map_err(|_| {
+                target.set_error(c_str!("Create sworndisk failed"));
+                ENODEV
+            })?,
+            false => SwornDisk::open(raw_disk, root_key).map_err(|_| {
+                target.set_error(c_str!("Open sworndisk failed"));
+                ENODEV
+            })?,
+        };
+        target.set_region(0..sworndisk.total_blocks());
+
+        let queue = Arc::new(ReqQueue::new(sworndisk));
         let queue_cloned = queue.clone();
         let handler = spawn(move || {
             ReqQueue::handler(queue_cloned);
@@ -310,25 +424,27 @@ impl TargetOperations for DmSwornDisk {
     }
 
     fn dtr(target: &mut Target<Self>) {
-        let Some(sworndisk) = target.private() else {
+        let Some(dm_sworndisk) = target.private() else {
             pr_warn!("Error, found no dm_sworndisk\n");
             return;
         };
 
-        sworndisk.queue.set_stopped();
-        let handler = sworndisk.handler.lock().take().unwrap();
+        dm_sworndisk.queue.set_stopped();
+        let handler = dm_sworndisk.handler.lock().take().unwrap();
         handler.join().unwrap();
+
+        dm_sworndisk.queue.sync().unwrap();
     }
 
     fn map(target: &Target<Self>, bio: Bio) -> MapState {
-        let Some(sworndisk) = target.private() else {
+        let Some(dm_sworndisk) = target.private() else {
             pr_warn!("Error, found no dm_sworndisk\n");
             return MapState::Kill;
         };
 
         match bio.op() {
             BioOp::Read | BioOp::Write => {
-                sworndisk.queue.enqueue(bio);
+                dm_sworndisk.queue.enqueue(bio);
                 return MapState::Submitted;
             }
             BioOp::Flush => {
@@ -571,4 +687,74 @@ fn test_skcipher() {
         return;
     }
     assert_eq!(decrypted, plaintext);
+}
+
+fn test_rawdisk() {
+    pr_info!("----test_rawdisk begin");
+    let thread = spawn(move || {
+        let rawdisk = RawDisk::open(c_str!("/dev/sdb")).unwrap();
+        let mut buf = Buf::alloc(1).unwrap();
+
+        let total_size = 1 * 1024 * 1024 * 1024;
+        let nblocks = total_size / BLOCK_SIZE;
+        pr_info!("----write begin");
+        for i in 0..nblocks {
+            buf.as_mut_slice().fill(i as u8);
+            match rawdisk.write(i, buf.as_ref()) {
+                Err(err) => pr_info!("write sworndisk failed, block_id: {}, err: {:?}", i, err),
+                Ok(_) => continue,
+            }
+        }
+        pr_info!("----write end");
+
+        rawdisk.flush().unwrap();
+
+        pr_info!("----read begin");
+        for i in 0..nblocks {
+            match rawdisk.read(i, buf.as_mut()) {
+                Err(err) => pr_info!("read sworndisk failed, block_id: {}, err: {:?}", i, err),
+                Ok(_) => continue,
+            }
+            assert_eq!(buf.as_slice()[0], i as u8);
+        }
+        pr_info!("----read end");
+        pr_info!("----test_rawdisk end");
+    });
+    Thread::sleep(core::time::Duration::from_secs(5));
+}
+
+fn test_sworndisk(total_size: usize) {
+    pr_info!("----test_sworndisk begin");
+    let thread = spawn(move || {
+        let root_key = AeadKey::default();
+        let raw_disk = RawDisk::open(c_str!("/dev/sdb")).unwrap();
+        let sworndisk = SwornDisk::create(raw_disk, root_key).unwrap();
+
+        let nblocks = total_size / BLOCK_SIZE;
+        let mut buf = Buf::alloc(1).unwrap();
+
+        pr_info!("----write begin");
+        for i in 0..nblocks {
+            buf.as_mut_slice().fill(i as u8);
+            match sworndisk.write(i, buf.as_ref()) {
+                Err(err) => pr_info!("write sworndisk failed, block_id: {}, err: {:?}", i, err),
+                Ok(_) => continue,
+            }
+        }
+        pr_info!("----write end");
+
+        sworndisk.sync().unwrap();
+
+        pr_info!("----read begin");
+        for i in 0..nblocks {
+            match sworndisk.read(i, buf.as_mut()) {
+                Err(err) => pr_info!("read sworndisk failed, block_id: {}, err: {:?}", i, err),
+                Ok(_) => continue,
+            }
+            assert_eq!(buf.as_slice()[0], i as u8);
+        }
+        pr_info!("----read end");
+        pr_info!("----test_sworndisk end");
+    });
+    Thread::sleep(core::time::Duration::from_secs(5));
 }
