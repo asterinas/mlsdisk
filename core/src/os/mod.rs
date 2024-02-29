@@ -18,9 +18,9 @@ pub use self::linux::{
     SkcipherKey, String, Tid, ToString, Vec, Weak, PAGE_SIZE,
 };
 
-#[cfg(all(feature = "occlum", target_env = "sgx"))]
+#[cfg(feature = "occlum")]
 mod occlum;
-#[cfg(all(feature = "occlum", target_env = "sgx"))]
+#[cfg(feature = "occlum")]
 pub use self::occlum::{
     Aead, AeadIv, AeadKey, AeadMac, Arc, BTreeMap, Box, CurrentThread, HashMap, HashSet, Mutex,
     MutexGuard, Pages, Rng, RwLock, RwLockReadGuard, RwLockWriteGuard, Skcipher, SkcipherIv,
