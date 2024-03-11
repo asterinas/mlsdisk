@@ -1,0 +1,37 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index 653c3bc..36ce410 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -99,6 +99,7 @@ Note the import of [HashMapExt]. This is needed for the constructor.
+ #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
+ #![cfg_attr(feature = "specialize", feature(min_specialization))]
+ #![cfg_attr(feature = "nightly-arm-aes", feature(stdarch_arm_neon_intrinsics))]
++#![feature(allocator_api)]
+ 
+ #[macro_use]
+ mod convert;
+diff --git a/src/random_state.rs b/src/random_state.rs
+index 3ee629f..c1feac9 100644
+--- a/src/random_state.rs
++++ b/src/random_state.rs
+@@ -189,12 +189,18 @@ cfg_if::cfg_if! {
+             /// method was previously invoked (true) or if the default source is already being used (false).
+             #[cfg(not(all(target_arch = "arm", target_os = "none")))]
+             pub fn set_random_source(source: impl RandomSource + Send + Sync + 'static) -> Result<(), bool> {
+-                RAND_SOURCE.set(Box::new(Box::new(source))).map_err(|s| s.as_ref().type_id() != TypeId::of::<&DefaultRandomSource>())
++                let source: Box<dyn RandomSource + Send + Sync + 'static> = Box::try_new(source).unwrap();
++                let source = Box::try_new(source).unwrap();
++                RAND_SOURCE
++                    .set(source)
++                    .map_err(|s| s.as_ref().type_id() != TypeId::of::<&DefaultRandomSource>())
+             }
+ 
+             #[inline]
+             fn get_src() -> &'static dyn RandomSource {
+-                RAND_SOURCE.get_or_init(|| Box::new(Box::new(DefaultRandomSource::new()))).as_ref()
++                let source: Box<(dyn RandomSource + Send + Sync + 'static)> = Box::try_new(DefaultRandomSource::new()).unwrap();
++                let source = Box::try_new(source).unwrap();
++                RAND_SOURCE.get_or_init(|| source).as_ref()
+             }
+         }
+ }

@@ -1,0 +1,42 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index daac0bc..512cebc 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -58,6 +58,7 @@
+ //! ```
+ 
+ #![no_std]
++#![feature(allocator_api)]
+ 
+ #[cfg(feature = "hashbrown")]
+ extern crate hashbrown;
+@@ -65,8 +66,8 @@ extern crate hashbrown;
+ #[cfg(test)]
+ extern crate scoped_threadpool;
+ 
+-use alloc::borrow::Borrow;
+ use alloc::boxed::Box;
++use core::borrow::Borrow;
+ use core::fmt;
+ use core::hash::{BuildHasher, Hash, Hasher};
+ use core::iter::FusedIterator;
+@@ -286,8 +287,8 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
+         let cache = LruCache {
+             map,
+             cap,
+-            head: Box::into_raw(Box::new(LruEntry::new_sigil())),
+-            tail: Box::into_raw(Box::new(LruEntry::new_sigil())),
++            head: Box::into_raw(Box::try_new(LruEntry::new_sigil()).unwrap()),
++            tail: Box::into_raw(Box::try_new(LruEntry::new_sigil()).unwrap()),
+         };
+ 
+         unsafe {
+@@ -409,7 +410,7 @@ impl<K: Hash + Eq, V, S: BuildHasher> LruCache<K, V, S> {
+             // if the cache is not full allocate a new LruEntry
+             // Safety: We allocate, turn into raw, and get NonNull all in one step.
+             (None, unsafe {
+-                NonNull::new_unchecked(Box::into_raw(Box::new(LruEntry::new(k, v))))
++                NonNull::new_unchecked(Box::into_raw(Box::try_new(LruEntry::new(k, v)).unwrap()))
+             })
+         }
+     }

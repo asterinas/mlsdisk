@@ -4,38 +4,38 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ahash = { version = "=0.8.9", default-features = false }
+allocator-api2 = { version = "=0.2.16", default-features = false }
+anymap = { git = "https://github.com/lucassong-mh/anymap", branch = "1.0.0-beta.2-patched", default-features = false, features = ["linux"] }
 bindings = { path = "../bindings" }
-inherit-methods-macro = { git = "https://github.com/asterinas/inherit-methods-macro", rev = "98f7e3e" }
-pod = { git = "https://github.com/asterinas/pod", rev = "7fa2ed2" }
-
-hashbrown = "=0.12.3"
-lending-iterator = "=0.1.7"
-lru = "=0.8.1"
-postcard = "=1.0.6"
-ahash = { version = "=0.7.7", default-features = false }
-anymap = { version = "=1.0.0-beta.2", default-features = false, features = ["hashbrown"] }
 crossbeam-queue = { version = "=0.3.11", default-features = false, features = ["alloc"] }
+hashbrown = { version = "=0.14.3", features = ["serde"] }
+inherit-methods-macro = { git = "https://github.com/asterinas/inherit-methods-macro", rev = "98f7e3e" }
+lending-iterator = "=0.1.7"
+lru = "=0.12.3"
+pod = { git = "https://github.com/asterinas/pod", rev = "7fa2ed2" }
+postcard = "=1.0.6"
 serde = { version = "=1.0.188", default-features = false, features = ["derive"] }
 sworndisk = { path = "../../core", package = "sworndisk-v2", default-features = false, features = ["linux"]}
 
 [patch.crates-io]
-ahash = { path = "target/patch/ahash-0.7.7" }
-anymap = { path = "target/patch/anymap-1.0.0-beta.2" }
+ahash = { path = "target/patch/ahash-0.8.9" }
+allocator-api2 = { path = "target/patch/allocator-api2-0.2.16" }
 crossbeam-queue = { path = "target/patch/crossbeam-queue-0.3.11" }
-hashbrown = { path = "target/patch/hashbrown-0.12.3" }
+hashbrown = { path = "target/patch/hashbrown-0.14.3" }
 lending-iterator = { path = "target/patch/lending-iterator-0.1.7" }
-lru = { path = "target/patch/lru-0.8.1" }
+lru = { path = "target/patch/lru-0.12.3" }
 postcard = { path = "target/patch/postcard-1.0.6" }
 serde = { path = "target/patch/serde-1.0.188" }
 
 [package.metadata.patch.ahash]
 patches = [
-    { path = "src/patch-files/ahash-0.7.7.patch", source = "GithubPrDiff" },
+    { path = "src/patch-files/ahash-0.8.9.patch", source = "GithubPrDiff" },
 ]
 
-[package.metadata.patch.anymap]
+[package.metadata.patch.allocator-api2]
 patches = [
-    { path = "src/patch-files/anymap-1.0.0-beta.2.patch", source = "GithubPrDiff" },
+    { path = "src/patch-files/allocator-api2-0.2.16.patch", source = "GithubPrDiff" },
 ]
 
 [package.metadata.patch.crossbeam-queue]
@@ -45,7 +45,7 @@ patches = [
 
 [package.metadata.patch.hashbrown]
 patches = [
-    { path = "src/patch-files/hashbrown-0.12.3.patch", source = "GithubPrDiff" },
+    { path = "src/patch-files/hashbrown-0.14.3.patch", source = "GithubPrDiff" },
 ]
 
 [package.metadata.patch.lending-iterator]
@@ -55,7 +55,7 @@ patches = [
 
 [package.metadata.patch.lru]
 patches = [
-    { path = "src/patch-files/lru-0.8.1.patch", source = "GithubPrDiff" },
+    { path = "src/patch-files/lru-0.12.3.patch", source = "GithubPrDiff" },
 ]
 
 [package.metadata.patch.postcard]

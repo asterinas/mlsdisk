@@ -1,0 +1,51 @@
+diff --git a/src/stable/alloc/global.rs b/src/stable/alloc/global.rs
+index e2dc27f..cd3509a 100644
+--- a/src/stable/alloc/global.rs
++++ b/src/stable/alloc/global.rs
+@@ -1,7 +1,7 @@
+ use core::ptr::NonNull;
+ 
+ #[doc(inline)]
+-pub use alloc_crate::alloc::{alloc, alloc_zeroed, dealloc, handle_alloc_error, realloc};
++pub use alloc_crate::alloc::{alloc, alloc_zeroed, dealloc, realloc};
+ 
+ use crate::stable::{assume, invalid_mut};
+ 
+diff --git a/src/stable/boxed.rs b/src/stable/boxed.rs
+index 7a0c033..1018342 100644
+--- a/src/stable/boxed.rs
++++ b/src/stable/boxed.rs
+@@ -165,7 +165,6 @@ use core::task::{Context, Poll};
+ 
+ use super::alloc::{AllocError, Allocator, Global, Layout};
+ use super::raw_vec::RawVec;
+-#[cfg(not(no_global_oom_handling))]
+ use super::vec::Vec;
+ #[cfg(not(no_global_oom_handling))]
+ use alloc_crate::alloc::handle_alloc_error;
+@@ -2104,13 +2103,6 @@ impl<B: std::io::BufRead + ?Sized, A: Allocator> std::io::BufRead for Box<B, A>
+     }
+ }
+ 
+-#[cfg(feature = "alloc")]
+-impl<A: Allocator> Extend<Box<str, A>> for alloc_crate::string::String {
+-    fn extend<I: IntoIterator<Item = Box<str, A>>>(&mut self, iter: I) {
+-        iter.into_iter().for_each(move |s| self.push_str(&s));
+-    }
+-}
+-
+ #[cfg(not(no_global_oom_handling))]
+ impl Clone for Box<core::ffi::CStr> {
+     #[inline]
+diff --git a/src/stable/slice.rs b/src/stable/slice.rs
+index 0883b72..2b2f7cf 100644
+--- a/src/stable/slice.rs
++++ b/src/stable/slice.rs
+@@ -61,6 +61,7 @@ pub trait SliceExt<T> {
+     /// // this will panic at runtime
+     /// b"0123456789abcdef".repeat(usize::MAX);
+     /// ```
++    #[cfg(not(no_global_oom_handling))]
+     fn repeat(&self, n: usize) -> Vec<T, Global>
+     where
+         T: Copy;
