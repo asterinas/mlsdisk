@@ -30,7 +30,14 @@
 #![feature(receiver_trait)]
 #![feature(unsize)]
 
-pub mod sync;
+mod bindings_generated {
+    include!("./bindings_generated.rs");
+    include!("./bindings_helpers_generated.rs");
+}
 
-include!("./bindings_generated.rs");
-include!("./bindings_helpers_generated.rs");
+pub mod sync;
+pub mod thread;
+
+// Use glob import here to expose all generated bindings for types.
+// Symbols defined within the module will take precedence to the glob import.
+pub use bindings_generated::*;
