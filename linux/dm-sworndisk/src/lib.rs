@@ -21,6 +21,7 @@ impl kernel::Module for Dummy {
 
         test_rwlock();
         test_weak();
+        test_thread();
 
         Ok(Dummy)
     }
@@ -91,4 +92,19 @@ fn test_weak() {
     drop(upgrade);
     let upgrade = weak.upgrade();
     assert_eq!(upgrade.is_some(), false);
+}
+
+fn test_thread() {
+    use bindings::thread::{sleep, spawn};
+    use core::time::Duration;
+
+    let t = spawn(|| {
+        for i in 0..5 {
+            sleep(Duration::from_secs(1));
+            pr_info!("spawn running: {i}");
+        }
+        21
+    });
+    let r = t.join();
+    assert_eq!(r, Ok(21));
 }

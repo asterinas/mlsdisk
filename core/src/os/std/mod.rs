@@ -29,6 +29,9 @@ pub use spin::{
     Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockUpgradableGuard, RwLockWriteGuard,
 };
 
+/// Reuse `spawn` and `JoinHandle` in `std::thread`.
+pub use std::thread::{spawn, JoinHandle};
+
 /// Reuse `std::thread::ThreadId`.
 pub type Tid = std::thread::ThreadId;
 
