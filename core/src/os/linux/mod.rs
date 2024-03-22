@@ -19,7 +19,7 @@ use core::{
     result, slice,
 };
 use kernel::{
-    current,
+    c_str, current,
     init::{InPlaceInit, Init, PinInit},
     new_mutex,
     sync::lock::{mutex::MutexBackend, Guard},
@@ -1271,13 +1271,20 @@ new_byte_array_type!(AeadIv, AES_GCM_IV_SIZE);
 new_byte_array_type!(AeadMac, AES_GCM_MAC_SIZE);
 
 /// An `AEAD` cipher.
-pub struct Aead;
+pub struct Aead {
+    inner: Pin<Box<bindings::crypto::Aead>>,
+}
 
-// TODO: impl `Aead` with linux kernel Crypto API.
 impl Aead {
     /// Construct an `Aead` instance.
     pub fn new() -> Self {
-        todo!()
+        let inner = Box::pin_init(bindings::crypto::Aead::new(
+            kernel::c_str!("gcm(aes)"),
+            0,
+            0,
+        ))
+        .expect("alloc gcm(aes) cipher failed");
+        Self { inner }
     }
 }
 
@@ -1294,7 +1301,15 @@ impl crate::util::Aead for Aead {
         aad: &[u8],
         output: &mut [u8],
     ) -> Result<AeadMac> {
-        todo!()
+        self.inner.set_key(key);
+        let req = self
+            .inner
+            .alloc_request()
+            .map_err(|_| Error::with_msg(Errno::OutOfMemory, "alloc aead_request failed"))?;
+        let mut mac = AeadMac::default();
+        req.encrypt(aad, input, &iv, output, &mut mac)
+            .map_err(|_| Error::with_msg(Errno::EncryptFailed, "gcm(aes) encryption failed"))?;
+        Ok(mac)
     }
 
     fn decrypt(
@@ -1306,7 +1321,13 @@ impl crate::util::Aead for Aead {
         mac: &AeadMac,
         output: &mut [u8],
     ) -> Result<()> {
-        todo!()
+        self.inner.set_key(key);
+        let req = self
+            .inner
+            .alloc_request()
+            .map_err(|_| Error::with_msg(Errno::OutOfMemory, "alloc aead_request failed"))?;
+        req.decrypt(aad, input, &mac, &iv, output)
+            .map_err(|_| Error::with_msg(Errno::DecryptFailed, "gcm(aes) decryption failed"))
     }
 }
 
@@ -1317,13 +1338,21 @@ new_byte_array_type!(SkcipherKey, AES_CTR_KEY_SIZE);
 new_byte_array_type!(SkcipherIv, AES_CTR_IV_SIZE);
 
 /// A symmetric key cipher.
-pub struct Skcipher;
+pub struct Skcipher {
+    inner: Pin<Box<bindings::crypto::Skcipher>>,
+}
 
 // TODO: impl `Skcipher` with linux kernel Crypto API.
 impl Skcipher {
     /// Construct a `Skcipher` instance.
     pub fn new() -> Self {
-        todo!()
+        let inner = Box::pin_init(bindings::crypto::Skcipher::new(
+            kernel::c_str!("ctr(aes)"),
+            0,
+            0,
+        ))
+        .expect("alloc ctr(aes) cipher failed");
+        Self { inner }
     }
 }
 
@@ -1338,7 +1367,13 @@ impl crate::util::Skcipher for Skcipher {
         iv: &SkcipherIv,
         output: &mut [u8],
     ) -> Result<()> {
-        todo!()
+        self.inner.set_key(key);
+        let req = self
+            .inner
+            .alloc_request()
+            .map_err(|_| Error::with_msg(Errno::OutOfMemory, "alloc skcipher_request failed"))?;
+        req.encrypt(input, &iv, output)
+            .map_err(|_| Error::with_msg(Errno::EncryptFailed, "ctr(aes) encryption failed"))
     }
 
     fn decrypt(
@@ -1348,6 +1383,12 @@ impl crate::util::Skcipher for Skcipher {
         iv: &SkcipherIv,
         output: &mut [u8],
     ) -> Result<()> {
-        todo!()
+        self.inner.set_key(key);
+        let req = self
+            .inner
+            .alloc_request()
+            .map_err(|_| Error::with_msg(Errno::OutOfMemory, "alloc skcipher_request failed"))?;
+        req.decrypt(input, &iv, output)
+            .map_err(|_| Error::with_msg(Errno::DecryptFailed, "ctr(aes) decryption failed"))
     }
 }
