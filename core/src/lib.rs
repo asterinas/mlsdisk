@@ -22,3 +22,9 @@ mod tx;
 mod util;
 
 extern crate alloc;
+
+pub use self::error::{Errno, Error};
+pub use self::layers::bio::{BlockId, BlockSet, Buf, BufMut, BufRef};
+
+#[cfg(feature = "linux")]
+pub use self::os::{Arc, Mutex};

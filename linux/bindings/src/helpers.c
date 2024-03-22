@@ -21,6 +21,7 @@
  */
 
 #include <linux/atomic.h>
+#include <linux/bio.h>
 #include <linux/refcount.h>
 #include <linux/sched/task.h>
 
@@ -57,4 +58,29 @@ struct task_struct *helper_get_task_struct(struct task_struct *t)
 void helper_put_task_struct(struct task_struct *t)
 {
 	put_task_struct(t);
+}
+
+void helper_bio_get(struct bio *bio)
+{
+	bio_get(bio);
+}
+
+void helper_bio_set_dev(struct bio *bio, struct block_device *bdev)
+{
+	bio_set_dev(bio, bdev);
+}
+
+bool helper_bio_has_data(struct bio *bio)
+{
+	return bio_has_data(bio);
+}
+
+struct page *helper_virt_to_page(void *addr)
+{
+	return virt_to_page(addr);
+}
+
+void *helper_page_to_virt(struct page *page)
+{
+	return page_to_virt(page);
 }
