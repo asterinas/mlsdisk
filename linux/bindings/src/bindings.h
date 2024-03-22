@@ -8,7 +8,9 @@
  * Sorted alphabetically.
  */
 
+#include <linux/bio.h>
 #include <linux/delay.h>
+#include <linux/device-mapper.h>
 #include <linux/kthread.h>
 #include <linux/lockdep_types.h>
 #include <linux/refcount.h>
