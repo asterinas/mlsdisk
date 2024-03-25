@@ -8,10 +8,14 @@
  * Sorted alphabetically.
  */
 
+#include <crypto/aead.h>
+#include <crypto/skcipher.h>
 #include <linux/bio.h>
+#include <linux/crypto.h>
 #include <linux/delay.h>
 #include <linux/device-mapper.h>
 #include <linux/kthread.h>
 #include <linux/lockdep_types.h>
 #include <linux/refcount.h>
 #include <linux/rwsem.h>
+#include <linux/scatterlist.h>

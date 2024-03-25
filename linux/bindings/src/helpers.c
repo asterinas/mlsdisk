@@ -20,10 +20,13 @@
  * accidentally exposed.
  */
 
+#include <crypto/aead.h>
+#include <crypto/skcipher.h>
 #include <linux/atomic.h>
 #include <linux/bio.h>
 #include <linux/refcount.h>
 #include <linux/sched/task.h>
+#include <linux/scatterlist.h>
 
 refcount_t helper_REFCOUNT_INIT(int n)
 {
@@ -83,4 +86,22 @@ struct page *helper_virt_to_page(void *addr)
 void *helper_page_to_virt(struct page *page)
 {
 	return page_to_virt(page);
+}
+
+void helper_sg_set_buf(struct scatterlist *sg, const void *buf,
+				unsigned int buflen)
+{
+	sg_set_buf(sg, buf, buflen);
+}
+
+struct aead_request *helper_aead_request_alloc(struct crypto_aead *tfm,
+				gfp_t gfp)
+{
+	return aead_request_alloc(tfm, gfp);
+}
+
+struct skcipher_request *helper_skcipher_request_alloc(
+				struct crypto_skcipher *tfm, gfp_t gfp)
+{
+	return skcipher_request_alloc(tfm, gfp);
 }
