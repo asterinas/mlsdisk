@@ -13,7 +13,7 @@ pub struct RangeQueryCtx<K, V> {
     start: K,
     num_values: usize,
     complete_table: BitMap,
-    min_completed: usize,
+    min_uncompleted: usize,
     res: Vec<(K, V)>,
 }
 
@@ -25,7 +25,7 @@ impl<K: RecordKey<K>, V: RecordValue> RangeQueryCtx<K, V> {
             start,
             num_values,
             complete_table: BitMap::repeat(false, num_values),
-            min_completed: 0,
+            min_uncompleted: 0,
             res: Vec::with_capacity(num_values),
         }
     }
@@ -33,7 +33,12 @@ impl<K: RecordKey<K>, V: RecordValue> RangeQueryCtx<K, V> {
     /// Gets the uncompleted range within the whole, returns `None`
     /// if all slots are already completed.
     pub fn range_uncompleted(&self) -> Option<RangeInclusive<K>> {
-        let first_uncompleted = self.start + self.complete_table.first_zero(self.min_completed)?;
+        if self.is_completed() {
+            return None;
+        }
+        debug_assert!(self.min_uncompleted < self.num_values);
+
+        let first_uncompleted = self.start + self.min_uncompleted;
         let last_uncompleted = self.start + self.complete_table.last_zero()?;
         Some(first_uncompleted..=last_uncompleted)
     }
@@ -47,7 +52,7 @@ impl<K: RecordKey<K>, V: RecordValue> RangeQueryCtx<K, V> {
     /// Whether the range query context is completed, means
     /// all slots are filled with the corresponding values.
     pub fn is_completed(&self) -> bool {
-        self.res.len() == self.num_values
+        self.min_uncompleted == self.num_values
     }
 
     /// Complete one slot within the range, with the specific
@@ -60,19 +65,31 @@ impl<K: RecordKey<K>, V: RecordValue> RangeQueryCtx<K, V> {
 
         self.res.push((key, value));
         self.complete_table.set(nth, true);
-        self.min_completed = self.min_completed.min(nth);
+        self.update_min_uncompleted(nth);
     }
 
     /// Mark the specific slot as completed.
     pub fn mark_completed(&mut self, key: K) {
         let nth = key - self.start;
+
         self.complete_table.set(nth, true);
-        self.min_completed = self.min_completed.min(nth);
+        self.update_min_uncompleted(nth);
     }
 
     /// Turn the context into final results.
     pub fn into_results(self) -> Vec<(K, V)> {
         debug_assert!(self.is_completed());
         self.res
+    }
+
+    fn update_min_uncompleted(&mut self, completed_nth: usize) {
+        if self.min_uncompleted == completed_nth {
+            if let Some(next_uncompleted) = self.complete_table.first_zero(completed_nth) {
+                self.min_uncompleted = next_uncompleted;
+            } else {
+                // Indicate all slots are completed
+                self.min_uncompleted = self.num_values;
+            }
+        }
     }
 }

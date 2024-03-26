@@ -1,3 +1,5 @@
+use core::fmt;
+
 /// The error types used in this crate.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Errno {
@@ -64,16 +66,28 @@ impl From<Errno> for Error {
     }
 }
 
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl fmt::Display for Errno {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[macro_export]
 macro_rules! return_errno {
     ($errno: expr) => {
-        return core::result::Result::Err(crate::error::Error::new($errno))
+        return core::result::Result::Err(crate::Error::new($errno))
     };
 }
 
 #[macro_export]
 macro_rules! return_errno_with_msg {
     ($errno: expr, $msg: expr) => {
-        return core::result::Result::Err(crate::error::Error::with_msg($errno, $msg))
+        return core::result::Result::Err(crate::Error::with_msg($errno, $msg))
     };
 }

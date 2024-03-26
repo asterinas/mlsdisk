@@ -70,6 +70,6 @@ mod wal;
 
 pub use self::range_query_ctx::RangeQueryCtx;
 pub use self::tx_lsm_tree::{
-    AsKV, LsmLevel, MasterSyncId, RecordKey, RecordValue, SyncID, TxEventListener,
+    AsKV, LsmLevel, RecordKey, RecordValue, SyncId, SyncIdStore, TxEventListener,
     TxEventListenerFactory, TxLsmTree, TxType,
 };

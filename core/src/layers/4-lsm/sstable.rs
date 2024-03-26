@@ -1,7 +1,7 @@
 //! Sorted String Table.
 use super::mem_table::ValueEx;
 use super::tx_lsm_tree::AsKVex;
-use super::{RangeQueryCtx, RecordKey, RecordValue, SyncID, TxEventListener};
+use super::{RangeQueryCtx, RecordKey, RecordValue, SyncId, TxEventListener};
 use crate::layers::bio::{BlockSet, Buf, BufMut, BufRef, BID_SIZE};
 use crate::layers::log::{TxLog, TxLogId, TxLogStore};
 use crate::os::Mutex;
@@ -42,7 +42,7 @@ struct FooterMeta {
     index_nblocks: u16,
     total_records: u32,
     record_block_size: u32,
-    sync_id: SyncID,
+    sync_id: SyncId,
 }
 const FOOTER_META_SIZE: usize = size_of::<FooterMeta>();
 
@@ -122,7 +122,7 @@ impl<K: RecordKey<K>, V: RecordValue> SSTable<K, V> {
 
     /// Return the sync ID of this `SSTable`, it may be smaller than the
     /// current master sync ID.
-    pub fn sync_id(&self) -> SyncID {
+    pub fn sync_id(&self) -> SyncId {
         self.footer.meta.sync_id
     }
 
@@ -263,7 +263,7 @@ impl<K: RecordKey<K>, V: RecordValue> SSTable<K, V> {
     /// This method must be called within a TX. Otherwise, this method panics.
     pub fn iter<'a, D: BlockSet + 'static>(
         &'a self,
-        sync_id: SyncID,
+        sync_id: SyncId,
         discard_unsynced: bool,
         tx_log_store: &'a Arc<TxLogStore<D>>,
         event_listener: Option<&'a Arc<dyn TxEventListener<K, V>>>,
@@ -298,7 +298,7 @@ impl<K: RecordKey<K>, V: RecordValue> SSTable<K, V> {
     /// This method must be called within a TX. Otherwise, this method panics.
     pub fn access_scan<D: BlockSet + 'static>(
         &self,
-        sync_id: SyncID,
+        sync_id: SyncId,
         discard_unsynced: bool,
         tx_log_store: &Arc<TxLogStore<D>>,
         event_listener: Option<&Arc<dyn TxEventListener<K, V>>>,
@@ -319,7 +319,7 @@ impl<K: RecordKey<K>, V: RecordValue> SSTable<K, V> {
     /// This method must be called within a TX. Otherwise, this method panics.
     pub fn build<'a, D: BlockSet + 'static, I, KVex>(
         records_iter: I,
-        sync_id: SyncID,
+        sync_id: SyncId,
         tx_log: &'a Arc<TxLog<D>>,
         event_listener: Option<&'a Arc<dyn TxEventListener<K, V>>>,
     ) -> Result<Self>
@@ -457,7 +457,7 @@ impl<K: RecordKey<K>, V: RecordValue> SSTable<K, V> {
     fn build_footer<'a, D: BlockSet + 'static>(
         index_vec: Vec<IndexEntry<K>>,
         total_records: usize,
-        sync_id: SyncID,
+        sync_id: SyncId,
         tx_log: &'a TxLog<D>,
     ) -> Result<Footer<K>>
     where
