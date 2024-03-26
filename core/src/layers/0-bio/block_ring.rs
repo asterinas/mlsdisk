@@ -24,7 +24,7 @@ use crate::prelude::*;
 ///
 /// 3. Avoiding overriding valid data blocks mistakenly.
 /// As the underlying storage is used in a ring buffer style, old
-/// blocks must be overriden to accommodate new blocks. The user must ensure
+/// blocks must be overridden to accommodate new blocks. The user must ensure
 /// that the underlying storage is big enough to avoid overriding any useful
 /// data.
 pub struct BlockRing<S> {

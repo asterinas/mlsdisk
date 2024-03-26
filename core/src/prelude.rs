@@ -8,7 +8,8 @@ pub(crate) use crate::{return_errno, return_errno_with_msg};
 
 pub(crate) type Result<T> = core::result::Result<T, Error>;
 
-#[cfg(feature = "std")]
+pub(crate) use core::fmt::{self, Debug};
+#[cfg(not(feature = "linux"))]
 pub(crate) use log::{debug, error, info, trace, warn};
 
 #[cfg(feature = "linux")]

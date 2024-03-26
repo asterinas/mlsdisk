@@ -1068,7 +1068,7 @@ impl<T> RwLock<T> {
     pub fn try_read(&self) -> Result<RwLockReadGuard<'_, T>> {
         self.inner
             .try_read()
-            .map_err(|_| Error::new(Errno::TryReadFailed))
+            .map_err(|_| Error::new(Errno::TryLockFailed))
     }
 
     /// Locks this `RwLock` with exclusive write access, blocking the current
@@ -1084,7 +1084,7 @@ impl<T> RwLock<T> {
     pub fn try_write(&self) -> Result<RwLockWriteGuard<'_, T>> {
         self.inner
             .try_write()
-            .map_err(|_| Error::new(Errno::TryWriteFailed))
+            .map_err(|_| Error::new(Errno::TryLockFailed))
     }
 }
 
