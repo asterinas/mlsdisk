@@ -8,27 +8,31 @@ bindings = { path = "../linux/bindings", optional = true }
 inherit-methods-macro = {git = "https://github.com/asterinas/inherit-methods-macro", rev = "98f7e3e"}
 pod = {git = "https://github.com/asterinas/pod", rev = "7fa2ed2"}
 
-ahash = { version = "=0.7.7", default-features = false }
-anymap = { version = "=1.0.0-beta.2", default-features = false, features = ["hashbrown"] }
+anymap = { git = "https://github.com/lucassong-mh/anymap", branch = "1.0.0-beta.2-patched", default-features = false, features = ["hashbrown"] }
 array-init = "2.1.0"
 bittle = "0.5.6"
 crossbeam-queue = { version = "=0.3.11", default-features = false, features = ["alloc"] }
-hashbrown = { version = "=0.12.3", features = ["serde"] }
+hashbrown = { version = "=0.14.3", features = ["serde"]  }
 lending-iterator = "=0.1.7"
 log = { version = "0.4", optional =  true }
-lru = "=0.8.1"
+lru = "=0.12.3"
 openssl = { version = "0.10.55", optional = true }
 postcard = "=1.0.6"
 serde = { version = "=1.0.188", default-features = false, features = ["alloc", "derive"] }
 spin = { version = "0.9.8", optional = true }
 static_assertions = "1.1.0"
 
+sgx_tstd = { git = "https://github.com/apache/teaclave-sgx-sdk.git", features = ["backtrace", "thread"], optional = true }
+sgx_rand = { git = "https://github.com/apache/teaclave-sgx-sdk.git", optional = true }
+sgx_tcrypto = { git = "https://github.com/apache/teaclave-sgx-sdk.git", optional = true }
+sgx_types = { git = "https://github.com/apache/teaclave-sgx-sdk.git", optional = true }
+
 [lib]
 doctest = false
 
 [features]
 default = ["std"]
-jinux = []
+std = ["spin", "openssl", "log"]
 linux = ["bindings"]
-occlum = []
-std = ["log", "openssl", "spin"]
+occlum = ["sgx_tstd", "sgx_rand", "sgx_tcrypto", "sgx_types", "spin", "log"]
+jinux = []
