@@ -1,5 +1,5 @@
 //! MemTable.
-use super::{AsKV, RangeQueryCtx, RecordKey, RecordValue, SyncID};
+use super::{AsKV, RangeQueryCtx, RecordKey, RecordValue, SyncId};
 use crate::os::{BTreeMap, Mutex, RwLock, RwLockReadGuard};
 use crate::prelude::*;
 
@@ -28,7 +28,7 @@ pub(super) struct MemTable<K: RecordKey<K>, V> {
     table: BTreeMap<K, ValueEx<V>>,
     size: usize,
     cap: usize,
-    sync_id: SyncID,
+    sync_id: SyncId,
     on_drop_record: Option<Arc<dyn Fn(&dyn AsKV<K, V>)>>,
 }
 
@@ -45,7 +45,7 @@ impl<K: RecordKey<K>, V: RecordValue> MemTableManager<K, V> {
     /// Creates a new `MemTableManager` given the current master sync ID,
     /// the capacity and the callback when dropping records.
     pub fn new(
-        sync_id: SyncID,
+        sync_id: SyncId,
         capacity: usize,
         on_drop_record_in_memtable: Option<Arc<dyn Fn(&dyn AsKV<K, V>)>>,
     ) -> Self {
@@ -106,7 +106,7 @@ impl<K: RecordKey<K>, V: RecordValue> MemTableManager<K, V> {
     }
 
     /// Sync the mutable `MemTable` with the given sync ID.
-    pub fn sync(&self, sync_id: SyncID) -> Result<()> {
+    pub fn sync(&self, sync_id: SyncId) -> Result<()> {
         self.mutable.lock().sync(sync_id)
     }
 
@@ -145,7 +145,7 @@ impl<K: RecordKey<K>, V: RecordValue> MemTable<K, V> {
     /// and the callback of dropping record.
     pub fn new(
         cap: usize,
-        sync_id: SyncID,
+        sync_id: SyncId,
         on_drop_record: Option<Arc<dyn Fn(&dyn AsKV<K, V>)>>,
     ) -> Self {
         Self {
@@ -196,7 +196,7 @@ impl<K: RecordKey<K>, V: RecordValue> MemTable<K, V> {
 
     /// Sync the table, update the sync ID, drop the replaced one.
     // TODO: Measure the cost upon frequent syncing
-    pub fn sync(&mut self, sync_id: SyncID) -> Result<()> {
+    pub fn sync(&mut self, sync_id: SyncId) -> Result<()> {
         debug_assert!(self.sync_id <= sync_id);
         if self.sync_id == sync_id {
             return Ok(());
@@ -216,7 +216,7 @@ impl<K: RecordKey<K>, V: RecordValue> MemTable<K, V> {
     }
 
     /// Return the sync ID of this table.
-    pub fn sync_id(&self) -> SyncID {
+    pub fn sync_id(&self) -> SyncId {
         self.sync_id
     }
 

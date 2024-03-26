@@ -10,20 +10,19 @@ use super::mem_table::{MemTableManager, ValueEx};
 use super::range_query_ctx::RangeQueryCtx;
 use super::sstable::SSTable;
 use super::wal::{WalAppendTx, BUCKET_WAL};
-use crate::layers::bio::{BlockSet, Buf};
+use crate::layers::bio::BlockSet;
 use crate::layers::log::{TxLogId, TxLogStore};
 use crate::os::{spawn, BTreeMap, RwLock};
 use crate::prelude::*;
 use crate::tx::Tx;
 
 use core::hash::Hash;
-use core::mem::size_of;
 use core::ops::{Add, RangeInclusive, Sub};
 use core::sync::atomic::{AtomicU64, Ordering};
 use pod::Pod;
 
 /// Monotonic incrementing sync ID.
-pub type SyncID = u64;
+pub type SyncId = u64;
 
 /// A transactional LSM-Tree, managing `MemTable`s, WALs and SSTs backed by `TxLogStore` (L3).
 ///
@@ -39,7 +38,7 @@ pub(super) struct TreeInner<K: RecordKey<K>, V, D> {
     compactor: Compactor<K, V>,
     tx_log_store: Arc<TxLogStore<D>>,
     listener_factory: Arc<dyn TxEventListenerFactory<K, V>>,
-    master_sync_id: MasterSyncId<D>,
+    master_sync_id: MasterSyncId,
 }
 
 /// Levels in a `TxLsmTree`.
@@ -99,10 +98,19 @@ pub enum TxType {
     Migration,
 }
 
+/// A trusted store that stores the master sync ID.
+pub trait SyncIdStore {
+    /// Read the current master sync ID from the store.
+    fn read(&self) -> Result<SyncId>;
+
+    /// Write the given master sync ID to the store.
+    fn write(&self, id: SyncId) -> Result<()>;
+}
+
 /// Master sync ID to help `TxLsmTree` achieve sync awareness.
-pub struct MasterSyncId<D> {
+pub(super) struct MasterSyncId {
     id: AtomicU64,
-    storage: D,
+    store: Option<Arc<dyn SyncIdStore>>,
 }
 
 /// A trait that represents the key for a record in a `TxLsmTree`.
@@ -137,13 +145,13 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TxLsmTree<K, V, D> 
         tx_log_store: Arc<TxLogStore<D>>,
         listener_factory: Arc<dyn TxEventListenerFactory<K, V>>,
         on_drop_record_in_memtable: Option<Arc<dyn Fn(&dyn AsKV<K, V>)>>,
-        master_sync_id: MasterSyncId<D>,
+        sync_id_store: Option<Arc<dyn SyncIdStore>>,
     ) -> Result<Self> {
         let inner = TreeInner::format(
             tx_log_store,
             listener_factory,
             on_drop_record_in_memtable,
-            master_sync_id,
+            sync_id_store,
         )?;
         Ok(Self(Arc::new(inner)))
     }
@@ -153,13 +161,13 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TxLsmTree<K, V, D> 
         tx_log_store: Arc<TxLogStore<D>>,
         listener_factory: Arc<dyn TxEventListenerFactory<K, V>>,
         on_drop_record_in_memtable: Option<Arc<dyn Fn(&dyn AsKV<K, V>)>>,
-        master_sync_id: MasterSyncId<D>,
+        sync_id_store: Option<Arc<dyn SyncIdStore>>,
     ) -> Result<Self> {
         let inner = TreeInner::recover(
             tx_log_store,
             listener_factory,
             on_drop_record_in_memtable,
-            master_sync_id,
+            sync_id_store,
         )?;
         Ok(Self(Arc::new(inner)))
     }
@@ -194,18 +202,20 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TxLsmTree<K, V, D> 
         // TODO: Error handling: Should discard current insertion in `MemTable`
         inner.wal_append_tx.commit()?;
 
-        // Trigger compaction when `MemTable` is at capacity
+        // Wait asynchronous compaction to finish
         // TODO: Infallible: If error occurs, the system may become inconsistent
         inner.compactor.wait_compaction()?;
 
         inner.memtable_manager.switch().unwrap();
 
+        // Trigger compaction when `MemTable` is at capacity
         // TODO: Error handling: Should discard current insertion in `MemTable`
         self.do_compaction_tx()?;
 
         // Discard current WAL
         // TODO: Error handling: Should try twice or just ignore
-        inner.wal_append_tx.discard()?; // WAL might be deleted before asynchronous minor compaction completed
+        // FIXME: WAL might be deleted before asynchronous compaction finished
+        inner.wal_append_tx.discard()?;
 
         Ok(())
     }
@@ -245,20 +255,21 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
         tx_log_store: Arc<TxLogStore<D>>,
         listener_factory: Arc<dyn TxEventListenerFactory<K, V>>,
         on_drop_record_in_memtable: Option<Arc<dyn Fn(&dyn AsKV<K, V>)>>,
-        master_sync_id: MasterSyncId<D>,
+        sync_id_store: Option<Arc<dyn SyncIdStore>>,
     ) -> Result<Self> {
+        let sync_id: SyncId = 0;
         Ok(Self {
             memtable_manager: MemTableManager::new(
-                master_sync_id.id(),
+                sync_id,
                 MEMTABLE_CAPACITY,
                 on_drop_record_in_memtable,
             ),
             sst_manager: RwLock::new(SstManager::new()),
-            wal_append_tx: WalAppendTx::new(&tx_log_store),
+            wal_append_tx: WalAppendTx::new(&tx_log_store, sync_id),
             compactor: Compactor::new(),
             tx_log_store,
             listener_factory,
-            master_sync_id,
+            master_sync_id: MasterSyncId::new(sync_id_store, sync_id)?,
         })
     }
 
@@ -266,20 +277,25 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
         tx_log_store: Arc<TxLogStore<D>>,
         listener_factory: Arc<dyn TxEventListenerFactory<K, V>>,
         on_drop_record_in_memtable: Option<Arc<dyn Fn(&dyn AsKV<K, V>)>>,
-        master_sync_id: MasterSyncId<D>,
+        sync_id_store: Option<Arc<dyn SyncIdStore>>,
     ) -> Result<Self> {
-        let synced_records = Self::collect_synced_records_from_wal(&tx_log_store)?;
+        let (synced_records, wal_sync_id) = Self::recover_from_wal(&tx_log_store)?;
+        let (sst_manager, ssts_sync_id) = Self::recover_sst_manager(&tx_log_store)?;
+
+        let max_sync_id = wal_sync_id.max(ssts_sync_id);
+        let master_sync_id = MasterSyncId::new(sync_id_store, max_sync_id)?;
+        let sync_id = master_sync_id.id();
+
         let memtable_manager = Self::recover_memtable_manager(
-            master_sync_id.id(),
+            sync_id,
             synced_records.into_iter(),
             on_drop_record_in_memtable,
         );
-        let sst_manager = Self::recover_sst_manager(&tx_log_store)?;
 
         let recov_self = Self {
             memtable_manager,
             sst_manager: RwLock::new(sst_manager),
-            wal_append_tx: WalAppendTx::new(&tx_log_store),
+            wal_append_tx: WalAppendTx::new(&tx_log_store, sync_id),
             compactor: Compactor::new(),
             tx_log_store,
             listener_factory,
@@ -293,22 +309,22 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
         Ok(recov_self)
     }
 
-    fn collect_synced_records_from_wal(tx_log_store: &Arc<TxLogStore<D>>) -> Result<Vec<(K, V)>> {
+    /// Recover the synced records and the maximum sync ID from the latest WAL.
+    fn recover_from_wal(tx_log_store: &Arc<TxLogStore<D>>) -> Result<(Vec<(K, V)>, SyncId)> {
         let mut tx = tx_log_store.new_tx();
         let res: Result<_> = tx.context(|| {
             let wal_res = tx_log_store.open_log_in(BUCKET_WAL);
             if let Err(e) = &wal_res
                 && e.errno() == NotFound
             {
-                return Ok(vec![]);
+                return Ok((vec![], 0));
             }
             let wal = wal_res?;
             // Only synced records count, all unsynced are discarded
-            WalAppendTx::collect_synced_records::<K, V>(&wal)
+            WalAppendTx::collect_synced_records_and_sync_id::<K, V>(&wal)
         });
         if res.is_ok() {
             tx.commit()?;
-            // TODO: Update master sync ID if mismatch
         } else {
             tx.abort();
             return_errno_with_msg!(TxAborted, "recover from WAL failed");
@@ -316,8 +332,9 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
         res
     }
 
+    /// Recover `MemTable` from the given synced records.
     fn recover_memtable_manager(
-        sync_id: SyncID,
+        sync_id: SyncId,
         synced_records: impl Iterator<Item = (K, V)>,
         on_drop_record_in_memtable: Option<Arc<dyn Fn(&dyn AsKV<K, V>)>>,
     ) -> MemTableManager<K, V> {
@@ -329,8 +346,13 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
         memtable_manager
     }
 
-    fn recover_sst_manager(tx_log_store: &Arc<TxLogStore<D>>) -> Result<SstManager<K, V>> {
+    /// Recover `SSTable`s from the given log store.
+    /// Return the recovered `SstManager` and the maximum sync ID present.
+    fn recover_sst_manager(
+        tx_log_store: &Arc<TxLogStore<D>>,
+    ) -> Result<(SstManager<K, V>, SyncId)> {
         let mut manager = SstManager::new();
+        let mut max_sync_id: SyncId = 0;
         let mut tx = tx_log_store.new_tx();
         let res: Result<_> = tx.context(|| {
             for (level, bucket) in LsmLevel::iter() {
@@ -343,6 +365,8 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
 
                 for id in log_ids? {
                     let log = tx_log_store.open_log(id, false)?;
+                    let sst = SSTable::<K, V>::from_log(&log)?;
+                    max_sync_id = max_sync_id.max(sst.sync_id());
                     manager.insert(SSTable::from_log(&log)?, level);
                 }
             }
@@ -354,7 +378,7 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
             tx.abort();
             return_errno_with_msg!(TxAborted, "recover TxLsmTree failed");
         }
-        Ok(manager)
+        Ok((manager, max_sync_id))
     }
 
     pub fn get(&self, key: &K) -> Result<V> {
@@ -388,14 +412,15 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
 
         self.memtable_manager.sync(master_sync_id)?;
 
+        // Wait asynchronous compaction to finish
         // TODO: Infallible: If error occurs, the system may become inconsistent
         self.compactor.wait_compaction()?;
+
         // TODO: Error handling: Should discard the earlier sync operation of `MemTable`
         self.tx_log_store.sync()?;
 
-        // TODO: Master sync ID should be updated to trusted storage
         // TODO: Error handling: Should discard the earlier sync operation of `MemTable`
-        self.master_sync_id.increment_and_store()?;
+        self.master_sync_id.increment()?;
         Ok(())
     }
 
@@ -708,40 +733,44 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
     }
 }
 
-impl<D: BlockSet + 'static> MasterSyncId<D> {
-    /// Get the current master sync ID.
-    pub fn id(&self) -> SyncID {
-        self.id.load(Ordering::Acquire)
-    }
-
+impl MasterSyncId {
     /// Create a new instance of `MasterSyncId`.
-    pub fn new(storage: D) -> Self {
-        Self {
-            id: AtomicU64::new(0),
-            storage,
-        }
-    }
-
-    /// Load the master sync ID from the given storage.
-    pub fn load(storage: D) -> Result<Self> {
-        let mut buf = Buf::alloc(1)?;
-        // TODO: Master sync ID should be fetched from external trusted storage
-        storage.read(0 as BlockId, buf.as_mut())?;
-        let id = SyncID::from_bytes(&buf.as_slice()[..size_of::<SyncID>()]);
+    /// Load the master sync ID from the given store if present.
+    /// If the store is not present, use the default sync ID instead.
+    pub fn new(store: Option<Arc<dyn SyncIdStore>>, default: SyncId) -> Result<Self> {
+        let id: SyncId = if let Some(store) = &store {
+            store.read()?
+        } else {
+            default
+        };
         Ok(Self {
             id: AtomicU64::new(id),
-            storage,
+            store,
         })
     }
 
-    /// Increment the current master sync ID then store the new ID
-    /// to the storage. On success, return the new master sync ID.
-    pub(super) fn increment_and_store(&self) -> Result<SyncID> {
+    /// Get the current master sync ID.
+    pub fn id(&self) -> SyncId {
+        self.id.load(Ordering::Acquire)
+    }
+
+    /// Increment the current master sync ID,
+    /// store the new ID to the store if present.
+    ///
+    /// On success, return the new master sync ID.
+    pub(super) fn increment(&self) -> Result<SyncId> {
         let incremented_id = self.id.fetch_add(1, Ordering::Release) + 1;
-        let mut buf = Buf::alloc(1)?;
-        buf.as_mut_slice()[..size_of::<SyncID>()].copy_from_slice(incremented_id.as_bytes());
-        self.storage.write(0 as BlockId, buf.as_ref())?;
+        if let Some(store) = &self.store {
+            store.write(incremented_id)?;
+        }
         Ok(incremented_id)
+    }
+}
+
+impl<K: RecordKey<K>, V, D> Drop for TreeInner<K, V, D> {
+    fn drop(&mut self) {
+        // TODO: Should we commit the WAL TX before dropping?
+        // self.wal_append_tx.commit().unwrap();
     }
 }
 
@@ -908,7 +937,11 @@ unsafe impl<K: RecordKey<K>, V, D> Sync for TreeInner<K, V, D> {}
 mod tests {
     use super::super::RangeQueryCtx;
     use super::*;
-    use crate::{layers::bio::MemDisk, os::AeadKey as Key, os::AeadMac as Mac};
+    use crate::{
+        layers::bio::{Buf, MemDisk},
+        os::AeadKey as Key,
+        os::AeadMac as Mac,
+    };
 
     struct Factory;
     struct Listener;
@@ -945,18 +978,37 @@ mod tests {
     impl RecordKey<BlockId> for BlockId {}
     impl RecordValue for Value {}
 
+    struct SyncIdMemStore {
+        mem_disk: MemDisk,
+    }
+
+    impl SyncIdStore for SyncIdMemStore {
+        fn read(&self) -> Result<SyncId> {
+            let mut buf = Buf::alloc(1)?;
+            self.mem_disk.read(0 as BlockId, buf.as_mut())?;
+            let id = SyncId::from_bytes(&buf.as_slice()[..core::mem::size_of::<SyncId>()]);
+            Ok(id)
+        }
+        fn write(&self, id: SyncId) -> Result<()> {
+            let mut buf = Buf::alloc(1)?;
+            buf.as_mut_slice()[..core::mem::size_of::<SyncId>()].copy_from_slice(id.as_bytes());
+            self.mem_disk.write(0 as BlockId, buf.as_ref())
+        }
+    }
+
     #[test]
     fn tx_lsm_tree_fns() -> Result<()> {
         let nblocks = 64 * 1024;
         let mem_disk = MemDisk::create(nblocks)?;
         let tx_log_store = Arc::new(TxLogStore::format(mem_disk, Key::random())?);
-        let storage_for_msid = MemDisk::create(1)?;
-        let master_sync_id = MasterSyncId::load(storage_for_msid.clone())?;
+        let sid_store = Arc::new(SyncIdMemStore {
+            mem_disk: MemDisk::create(1)?,
+        });
         let tx_lsm_tree: TxLsmTree<BlockId, Value, MemDisk> = TxLsmTree::format(
             tx_log_store.clone(),
             Arc::new(Factory),
             None,
-            master_sync_id,
+            Some(sid_store.clone()),
         )?;
 
         // Put sufficient records which can trigger compaction before a sync command
@@ -1006,7 +1058,7 @@ mod tests {
             tx_log_store.clone(),
             Arc::new(Factory),
             None,
-            MasterSyncId::load(storage_for_msid)?,
+            Some(sid_store),
         )?;
 
         assert!(tx_lsm_tree.get(&(600 + cap)).is_err());
