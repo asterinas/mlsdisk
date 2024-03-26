@@ -111,7 +111,7 @@ impl BitMap {
 
     /// Get the number of zero bits in the bitmap.
     pub fn count_zeros(&self) -> usize {
-        let mut total_zeros = self.bits.count_zeros() as usize;
+        let total_zeros = self.bits.count_zeros() as usize;
         total_zeros - self.bits_not_in_use()
     }
 
@@ -132,6 +132,41 @@ impl BitMap {
             .find(|&index| index >= from)
     }
 
+    /// Find `count` indexes of the first one bits, starting from the given index (inclusively).
+    ///
+    /// Return `None` if fewer than `count` one bits are found.
+    ///
+    /// # Panics
+    ///
+    /// The `from + count` index must be within the total number of bits. Otherwise, this method panics.
+    pub fn first_ones(&self, from: usize, count: usize) -> Option<Vec<usize>> {
+        self.check_index(from + count - 1);
+        let first_u64_index = from / 64;
+
+        let ones: Vec<_> = self.bits[first_u64_index..]
+            .iter_ones()
+            .map(|index| first_u64_index * 64 + (index as usize))
+            .filter(|&index| index >= from)
+            .take(count)
+            .collect();
+        if ones.len() == count {
+            Some(ones)
+        } else {
+            None
+        }
+    }
+
+    /// Find the index of the last one bit.
+    ///
+    /// Return `None` if no one bit is found.
+    pub fn last_one(&self) -> Option<usize> {
+        self.bits
+            .iter_ones()
+            .rev()
+            .map(|index| index as usize)
+            .next()
+    }
+
     /// Find the index of the first zero bit, starting from the given index (inclusively).
     ///
     /// Return `None` if no zero bit is found.
@@ -147,6 +182,42 @@ impl BitMap {
             .iter_zeros()
             .map(|index| first_u64_index * 64 + (index as usize))
             .find(|&index| index >= from && index < self.len())
+    }
+
+    /// Find `count` indexes of the first zero bits, starting from the given index (inclusively).
+    ///
+    /// Return `None` if fewer than `count` zero bits are found.
+    ///
+    /// # Panics
+    ///
+    /// The `from + count` index must be within the total number of bits. Otherwise, this method panics.
+    pub fn first_zeros(&self, from: usize, count: usize) -> Option<Vec<usize>> {
+        self.check_index(from + count - 1);
+        let first_u64_index = from / 64;
+
+        let zeros: Vec<_> = self.bits[first_u64_index..]
+            .iter_zeros()
+            .map(|index| first_u64_index * 64 + (index as usize))
+            .filter(|&index| index >= from && index < self.len())
+            .take(count)
+            .collect();
+        if zeros.len() == count {
+            Some(zeros)
+        } else {
+            None
+        }
+    }
+
+    /// Find the index of the last zero bit.
+    ///
+    /// Return `None` if no zero bit is found.
+    pub fn last_zero(&self) -> Option<usize> {
+        self.bits
+            .iter_zeros()
+            .rev()
+            .skip(self.bits_not_in_use())
+            .map(|index| index as usize)
+            .next()
     }
 }
 
@@ -206,17 +277,23 @@ mod tests {
     }
 
     #[test]
-    fn find_first() {
+    fn find_first_last() {
         let mut bm = BitMap::repeat(false, 100);
         bm.set_bit(64);
         assert_eq!(bm.first_one(0), Some(64));
         assert_eq!(bm.first_one(64), Some(64));
         assert_eq!(bm.first_one(65), None);
+        assert_eq!(bm.first_ones(0, 1), Some(vec![64]));
+        assert_eq!(bm.first_ones(0, 2), None);
+        assert_eq!(bm.last_one(), Some(64));
 
         let mut bm = BitMap::repeat(true, 100);
         bm.clear_bit(64);
         assert_eq!(bm.first_zero(0), Some(64));
         assert_eq!(bm.first_zero(64), Some(64));
         assert_eq!(bm.first_zero(65), None);
+        assert_eq!(bm.first_zeros(0, 1), Some(vec![64]));
+        assert_eq!(bm.first_zeros(0, 2), None);
+        assert_eq!(bm.last_zero(), Some(64));
     }
 }

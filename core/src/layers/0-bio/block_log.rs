@@ -67,7 +67,7 @@ impl BlockLog for MemLog {
     fn append(&self, buf: BufRef) -> Result<BlockId> {
         let nblocks = buf.nblocks();
         let mut log = self.log.lock();
-        let pos = self.append_pos.load(Ordering::Relaxed);
+        let pos = self.append_pos.load(Ordering::Acquire);
         if pos + nblocks > log.nblocks() {
             return_errno_with_msg!(InvalidArgs, "append range out of bound");
         }
@@ -83,7 +83,7 @@ impl BlockLog for MemLog {
     }
 
     fn nblocks(&self) -> usize {
-        self.append_pos.load(Ordering::Relaxed)
+        self.append_pos.load(Ordering::Acquire)
     }
 }
 

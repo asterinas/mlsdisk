@@ -6,7 +6,7 @@ pub mod crypto;
 pub mod edit;
 #[path = "3-log/mod.rs"]
 pub mod log;
-// #[path = "4-lsm/mod.rs"] // Uncomment this when it's ready
-// pub mod lsm;
+#[path = "4-lsm/mod.rs"]
+pub mod lsm;
 // #[path = "5-disk/mod.rs"] // Uncomment this when it's ready
 // pub mod disk;
