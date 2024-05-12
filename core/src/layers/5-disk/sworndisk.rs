@@ -444,7 +444,7 @@ impl<D: BlockSet + 'static> DiskInner<D> {
     pub fn sync(&self) -> Result<()> {
         let _guard = self.sync_region.lock();
 
-        self.write_blocks_from_data_buf()?;
+        self.flush_data_buf()?;
         debug_assert!(self.data_buf.is_empty());
 
         self.logical_block_table.sync()?;
@@ -711,6 +711,73 @@ impl AsKV<RecordKey, RecordValue> for Record {
 
     fn value(&self) -> &RecordValue {
         &self.value
+    }
+}
+
+#[cfg(feature = "occlum")]
+mod impl_block_device {
+    use super::{BlockSet, BufMut, BufRef, SwornDisk, Vec};
+    use ext2_rs::{Bid, BlockDevice, FsError as Ext2Error};
+
+    impl<D: BlockSet + 'static> BlockDevice for SwornDisk<D> {
+        fn total_blocks(&self) -> usize {
+            self.total_blocks()
+        }
+
+        fn read_blocks(&self, bid: Bid, blocks: &mut [&mut [u8]]) -> Result<(), Ext2Error> {
+            if blocks.len() == 1 {
+                self.read(
+                    bid as _,
+                    BufMut::try_from(blocks.first_mut().unwrap().as_mut()).unwrap(),
+                )?;
+                return Ok(());
+            }
+
+            let mut bufs = blocks
+                .iter_mut()
+                .map(|block| BufMut::try_from(block.as_mut()).unwrap())
+                .collect::<Vec<_>>();
+            self.readv(bid as _, &mut bufs)?;
+            Ok(())
+        }
+
+        fn write_blocks(&self, bid: Bid, blocks: &[&[u8]]) -> Result<(), Ext2Error> {
+            if blocks.len() == 1 {
+                self.write(
+                    bid as _,
+                    BufRef::try_from(blocks.first().unwrap().as_ref()).unwrap(),
+                )?;
+                return Ok(());
+            }
+
+            let bufs = blocks
+                .iter()
+                .map(|block| BufRef::try_from(block.as_ref()).unwrap())
+                .collect::<Vec<_>>();
+            self.writev(bid as _, &bufs)?;
+            Ok(())
+        }
+
+        fn sync(&self) -> Result<(), Ext2Error> {
+            self.sync()?;
+            Ok(())
+        }
+    }
+
+    impl From<crate::Error> for Ext2Error {
+        fn from(value: crate::Error) -> Self {
+            match value.errno() {
+                crate::Errno::NotFound => Self::EntryNotFound,
+                crate::Errno::InvalidArgs => Self::InvalidParam,
+                crate::Errno::OutOfDisk => Self::NoDeviceSpace,
+                crate::Errno::PermissionDenied => Self::PermError,
+                _ => {
+                    #[cfg(not(feature = "linux"))]
+                    log::error!("[SwornDisk] Error occurred: {value:?}");
+                    Self::DeviceError(0)
+                }
+            }
+        }
     }
 }
 

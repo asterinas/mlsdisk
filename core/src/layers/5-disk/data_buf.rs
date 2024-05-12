@@ -98,17 +98,10 @@ impl DataBuf {
     }
 
     /// Empty the buffer.
-    ///
-    /// # Panics
-    ///
-    /// Attempt to clear a non-full buffer will cause this method to panic.
     pub fn clear(&self) {
-        let mut is_full = self.is_full.lock().unwrap();
-        assert!(*is_full);
-
         self.buf.lock().clear();
 
-        *is_full = false;
+        *self.is_full.lock().unwrap() = false;
         self.cvar.notify_all();
     }
 
