@@ -16,6 +16,7 @@
 #![feature(tuple_trait)]
 #![feature(unboxed_closures)]
 #![feature(unsize)]
+#![allow(dead_code, stable_features, unknown_lints, unused_imports)]
 
 mod error;
 mod layers;

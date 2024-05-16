@@ -23,7 +23,6 @@ pub use sgx_tstd::collections::BTreeMap;
 pub use sgx_tstd::string::{String, ToString};
 pub use sgx_tstd::sync::{Arc, Weak};
 pub use sgx_tstd::thread::{spawn, JoinHandle};
-#[macro_use]
 pub use sgx_tstd::vec::Vec;
 
 /// Unique ID for the OS thread.
