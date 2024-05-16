@@ -25,9 +25,9 @@ pub(super) struct WalAppendTx<D> {
 }
 
 struct WalTxInner<D> {
-    /// Ongoing TX and appended WAL.
+    /// Ongoing TX and the appended WAL.
     wal_tx_and_log: Option<(RefCell<Tx>, Arc<TxLog<D>>)>,
-    /// Current log ID of WAL for later discard.
+    /// Current log ID of WAL for later use.
     log_id: Option<TxLogId>,
     /// Store current sync ID as the first record of WAL.
     sync_id: SyncId,
@@ -81,23 +81,35 @@ impl<D: BlockSet + 'static> WalAppendTx<D> {
     }
 
     /// Commit phase for an Append TX, mainly to commit (or abort) the TX.
-    pub fn commit(&self) -> Result<()> {
+    /// After the committed WAL is sealed. Return the corresponding log ID.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if current WAL's TX does not exist.
+    pub fn commit(&self) -> Result<TxLogId> {
         let mut inner = self.inner.lock();
-        if inner.wal_tx_and_log.is_none() || inner.record_buf.is_empty() {
-            return Ok(());
-        }
 
-        inner.align_record_buf();
-        let (wal_tx, wal_log) = inner.wal_tx_and_log.take().unwrap();
-        self.flush_buf(&inner.record_buf, wal_tx.borrow_mut(), &wal_log)?;
-        inner.record_buf.clear();
+        let (wal_tx, wal_log) = inner
+            .wal_tx_and_log
+            .take()
+            .expect("current WAL TX must exist");
+        let wal_id = inner.log_id.take().unwrap();
+        debug_assert_eq!(wal_id, wal_log.id());
+
+        if !inner.record_buf.is_empty() {
+            inner.align_record_buf();
+            self.flush_buf(&inner.record_buf, wal_tx.borrow_mut(), &wal_log)?;
+            inner.record_buf.clear();
+        }
 
         drop(wal_log);
         let mut wal_tx = wal_tx.borrow_mut();
-        wal_tx.commit()
+        wal_tx.commit()?;
+        Ok(wal_id)
     }
 
-    /// Appends current sync ID to WAL.
+    /// Appends current sync ID to WAL then commit the TX to ensure WAL's persistency.
+    /// Save the log ID for later appending.
     pub fn sync(&self, sync_id: SyncId) -> Result<()> {
         let mut inner = self.inner.lock();
         if inner.wal_tx_and_log.is_none() {
@@ -135,31 +147,14 @@ impl<D: BlockSet + 'static> WalAppendTx<D> {
         res
     }
 
-    /// Deletes the current WAL.
-    pub fn discard(&self) -> Result<()> {
-        let mut inner = self.inner.lock();
-        debug_assert!(inner.record_buf.is_empty());
-        let _ = inner.wal_tx_and_log.take();
-        let log_id = inner.log_id.take().unwrap();
-
-        let store = inner.tx_log_store.clone();
-        let mut wal_tx = store.new_tx();
-        let res = wal_tx.context(move || store.delete_log(log_id));
-        if res.is_err() {
-            wal_tx.abort();
-            return res;
-        }
-        wal_tx.commit()
-    }
-
-    /// Collect the synced records only and the maximum sync ID in the WAL.
+    /// Collects the synced records only and the maximum sync ID in the WAL.
     pub fn collect_synced_records_and_sync_id<K: Pod, V: Pod>(
         wal: &TxLog<D>,
     ) -> Result<(Vec<(K, V)>, SyncId)> {
         let nblocks = wal.nblocks();
         let mut records = Vec::new();
 
-        // TODO: Allocate seperate buffers for large WAL
+        // TODO: Allocate separate buffers for large WAL
         let mut buf = Buf::alloc(nblocks)?;
         wal.read(0 as BlockId, buf.as_mut())?;
         let buf_slice = buf.as_slice();
@@ -248,7 +243,7 @@ impl<D: BlockSet + 'static> WalTxInner<D> {
         Ok(())
     }
 
-    pub fn align_record_buf(&mut self) {
+    fn align_record_buf(&mut self) {
         let aligned_len = align_up(self.record_buf.len(), BLOCK_SIZE);
         self.record_buf.resize(aligned_len, 0);
     }

@@ -183,7 +183,6 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TxLsmTree<K, V, D> 
     }
 
     /// Puts a key-value record to the tree.
-    // TODO: Handle the errors gracefully
     pub fn put(&self, key: K, value: V) -> Result<()> {
         let inner = &self.0;
         let record = (key, value);
@@ -198,26 +197,17 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TxLsmTree<K, V, D> 
         }
 
         // Commit WAL TX before compaction
-        // TODO: Think of combining WAL's TX with minor compaction TX?
-        // TODO: Error handling: Should discard current insertion in `MemTable`
-        inner.wal_append_tx.commit()?;
+        // TODO: Error handling: try twice or ignore
+        let wal_id = inner.wal_append_tx.commit()?;
 
         // Wait asynchronous compaction to finish
-        // TODO: Infallible: If error occurs, the system may become inconsistent
+        // TODO: Error handling for compaction: try twice or become read-only
         inner.compactor.wait_compaction()?;
 
         inner.memtable_manager.switch().unwrap();
 
         // Trigger compaction when `MemTable` is at capacity
-        // TODO: Error handling: Should discard current insertion in `MemTable`
-        self.do_compaction_tx()?;
-
-        // Discard current WAL
-        // TODO: Error handling: Should try twice or just ignore
-        // FIXME: WAL might be deleted before asynchronous compaction finished
-        inner.wal_append_tx.discard()?;
-
-        Ok(())
+        self.do_compaction_tx(wal_id)
     }
 
     /// Persist all in-memory data of `TxLsmTree` to the backed storage.
@@ -226,7 +216,8 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TxLsmTree<K, V, D> 
     }
 
     /// Do a compaction TX.
-    fn do_compaction_tx(&self) -> Result<()> {
+    /// The given `wal_id` is used to identify the WAL for discarding.
+    fn do_compaction_tx(&self, wal_id: TxLogId) -> Result<()> {
         let inner = self.0.clone();
         let handle = spawn(move || -> Result<()> {
             // Do major compaction first if necessary
@@ -235,11 +226,11 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TxLsmTree<K, V, D> 
                 .read()
                 .require_major_compaction(LsmLevel::L0)
             {
-                inner.do_compaction_tx(LsmLevel::L1)?;
+                inner.do_major_compaction(LsmLevel::L1)?;
             }
 
             // Do minor compaction
-            inner.do_compaction_tx(LsmLevel::L0)?;
+            inner.do_minor_compaction(wal_id)?;
 
             Ok(())
         });
@@ -404,22 +395,21 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
         Ok(())
     }
 
-    // TODO: Handle the errors gracefully
     pub fn sync(&self) -> Result<()> {
         let master_sync_id = self.master_sync_id.id() + 1;
 
-        self.wal_append_tx.sync(master_sync_id)?;
-
-        self.memtable_manager.sync(master_sync_id)?;
-
         // Wait asynchronous compaction to finish
-        // TODO: Infallible: If error occurs, the system may become inconsistent
+        // TODO: Error handling for compaction: try twice or become read-only
         self.compactor.wait_compaction()?;
 
-        // TODO: Error handling: Should discard the earlier sync operation of `MemTable`
-        self.tx_log_store.sync()?;
+        // TODO: Error handling for WAL: try twice or become read-only
+        self.wal_append_tx.sync(master_sync_id)?;
 
-        // TODO: Error handling: Should discard the earlier sync operation of `MemTable`
+        self.memtable_manager.sync(master_sync_id);
+
+        self.tx_log_store.sync().unwrap();
+
+        // TODO: Error handling: try twice or ignore
         self.master_sync_id.increment()?;
         Ok(())
     }
@@ -492,17 +482,8 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
         read_res
     }
 
-    /// Compaction TX.
-    fn do_compaction_tx(&self, to_level: LsmLevel) -> Result<()> {
-        match to_level {
-            LsmLevel::L0 => self.do_minor_compaction(),
-            LsmLevel::L1 => self.do_major_compaction(to_level),
-            _ => unreachable!(),
-        }
-    }
-
     /// Minor Compaction TX { to_level: LsmLevel::L0 }.
-    fn do_minor_compaction(&self) -> Result<()> {
+    fn do_minor_compaction(&self, wal_id: TxLogId) -> Result<()> {
         let mut tx = self.tx_log_store.new_tx();
         // Prepare TX listener
         let tx_type = TxType::Compaction {
@@ -526,13 +507,13 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
             let sync_id = immutable_memtable.sync_id();
 
             let sst = SSTable::build(records_iter, sync_id, &tx_log, Some(&event_listener))?;
-            self.sst_manager.write().insert(sst, LsmLevel::L0);
-            Ok(())
+            self.tx_log_store.delete_log(wal_id)?;
+            Ok(sst)
         });
-        if res.is_err() {
+        let new_sst = res.map_err(|_| {
             tx.abort();
-            return_errno_with_msg!(TxAborted, "minor compaction TX failed");
-        }
+            Error::with_msg(TxAborted, "minor compaction TX failed")
+        })?;
 
         event_listener.on_tx_precommit(&mut tx).map_err(|_| {
             tx.abort();
@@ -544,6 +525,8 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
 
         tx.commit()?;
         event_listener.on_tx_commit();
+
+        self.sst_manager.write().insert(new_sst, LsmLevel::L0);
 
         #[cfg(not(feature = "linux"))]
         debug!("[SwornDisk TxLsmTree] Minor Compaction completed: {self:?}");
@@ -770,7 +753,7 @@ impl MasterSyncId {
 impl<K: RecordKey<K>, V, D> Drop for TreeInner<K, V, D> {
     fn drop(&mut self) {
         // TODO: Should we commit the WAL TX before dropping?
-        // self.wal_append_tx.commit().unwrap();
+        // let _ = self.wal_append_tx.commit();
     }
 }
 
@@ -978,38 +961,13 @@ mod tests {
     impl RecordKey<BlockId> for BlockId {}
     impl RecordValue for Value {}
 
-    struct SyncIdMemStore {
-        mem_disk: MemDisk,
-    }
-
-    impl SyncIdStore for SyncIdMemStore {
-        fn read(&self) -> Result<SyncId> {
-            let mut buf = Buf::alloc(1)?;
-            self.mem_disk.read(0 as BlockId, buf.as_mut())?;
-            let id = SyncId::from_bytes(&buf.as_slice()[..core::mem::size_of::<SyncId>()]);
-            Ok(id)
-        }
-        fn write(&self, id: SyncId) -> Result<()> {
-            let mut buf = Buf::alloc(1)?;
-            buf.as_mut_slice()[..core::mem::size_of::<SyncId>()].copy_from_slice(id.as_bytes());
-            self.mem_disk.write(0 as BlockId, buf.as_ref())
-        }
-    }
-
     #[test]
     fn tx_lsm_tree_fns() -> Result<()> {
         let nblocks = 64 * 1024;
         let mem_disk = MemDisk::create(nblocks)?;
         let tx_log_store = Arc::new(TxLogStore::format(mem_disk, Key::random())?);
-        let sid_store = Arc::new(SyncIdMemStore {
-            mem_disk: MemDisk::create(1)?,
-        });
-        let tx_lsm_tree: TxLsmTree<BlockId, Value, MemDisk> = TxLsmTree::format(
-            tx_log_store.clone(),
-            Arc::new(Factory),
-            None,
-            Some(sid_store.clone()),
-        )?;
+        let tx_lsm_tree: TxLsmTree<BlockId, Value, MemDisk> =
+            TxLsmTree::format(tx_log_store.clone(), Arc::new(Factory), None, None)?;
 
         // Put sufficient records which can trigger compaction before a sync command
         let cap = MEMTABLE_CAPACITY;
@@ -1054,12 +1012,8 @@ mod tests {
 
         // Recover the `TxLsmTree`, all unsynced records should be discarded
         drop(tx_lsm_tree);
-        let tx_lsm_tree: TxLsmTree<BlockId, Value, MemDisk> = TxLsmTree::recover(
-            tx_log_store.clone(),
-            Arc::new(Factory),
-            None,
-            Some(sid_store),
-        )?;
+        let tx_lsm_tree: TxLsmTree<BlockId, Value, MemDisk> =
+            TxLsmTree::recover(tx_log_store.clone(), Arc::new(Factory), None, None)?;
 
         assert!(tx_lsm_tree.get(&(600 + cap)).is_err());
 

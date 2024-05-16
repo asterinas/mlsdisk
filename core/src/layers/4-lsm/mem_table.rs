@@ -106,7 +106,7 @@ impl<K: RecordKey<K>, V: RecordValue> MemTableManager<K, V> {
     }
 
     /// Sync the mutable `MemTable` with the given sync ID.
-    pub fn sync(&self, sync_id: SyncId) -> Result<()> {
+    pub fn sync(&self, sync_id: SyncId) {
         self.mutable.lock().sync(sync_id)
     }
 
@@ -127,7 +127,7 @@ impl<K: RecordKey<K>, V: RecordValue> MemTableManager<K, V> {
 
         debug_assert!(mutable.is_empty() && immutable.at_capacity());
         // Update sync ID of the switched mutable `MemTable`
-        mutable.sync(sync_id)?;
+        mutable.sync(sync_id);
 
         *is_full = false;
         self.cvar.notify_all();
@@ -196,10 +196,10 @@ impl<K: RecordKey<K>, V: RecordValue> MemTable<K, V> {
 
     /// Sync the table, update the sync ID, drop the replaced one.
     // TODO: Measure the cost upon frequent syncing
-    pub fn sync(&mut self, sync_id: SyncId) -> Result<()> {
+    pub fn sync(&mut self, sync_id: SyncId) {
         debug_assert!(self.sync_id <= sync_id);
         if self.sync_id == sync_id {
-            return Ok(());
+            return;
         }
 
         for (k, v_ex) in self.table.iter_mut().filter(|(_, v_ex)| !v_ex.is_synced()) {
@@ -212,7 +212,6 @@ impl<K: RecordKey<K>, V: RecordValue> MemTable<K, V> {
         }
 
         self.sync_id = sync_id;
-        Ok(())
     }
 
     /// Return the sync ID of this table.
