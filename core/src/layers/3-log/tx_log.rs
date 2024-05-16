@@ -147,6 +147,7 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
             chunk_area_nblocks: log_store_nblocks,
             magic: MAGIC_NUMBER,
         };
+        superblock.persist(&disk.subset(0..1)?, &root_key)?;
 
         Ok(Self::from_parts(
             tx_log_store_state,
@@ -281,7 +282,6 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
                     journal.add(AllEdit::from_tx_log_edit(tx_log_edit));
                 });
                 journal.commit();
-                // TODO: Decide when to call `flush()` to ensure journal's persistence
             }
         });
 
@@ -678,11 +678,9 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
 
     /// Syncs all the data managed by `TxLogStore` for persistence.
     pub fn sync(&self) -> Result<()> {
-        self.raw_log_store.sync()?;
+        self.raw_log_store.sync().unwrap();
         self.journal.lock().flush()?;
 
-        self.superblock
-            .persist(&self.raw_disk.subset(0..1)?, &self.root_key)?;
         self.raw_disk.flush()?;
         Ok(())
     }
