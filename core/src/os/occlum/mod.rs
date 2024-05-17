@@ -12,7 +12,7 @@ use sgx_tcrypto::{rsgx_aes_ctr_decrypt, rsgx_aes_ctr_encrypt};
 use sgx_tcrypto::{rsgx_rijndael128GCM_decrypt, rsgx_rijndael128GCM_encrypt};
 use sgx_tstd::alloc::{alloc, dealloc, Layout};
 use sgx_tstd::thread;
-use sgx_types::sgx_status_t;
+use sgx_types::{sgx_key_128bit_t, sgx_status_t};
 
 pub use hashbrown::{HashMap, HashSet};
 /// Reuse lock implementation of crate spin.
@@ -191,6 +191,12 @@ const AES_GCM_MAC_SIZE: usize = 16;
 new_byte_array_type!(AeadKey, AES_GCM_KEY_SIZE);
 new_byte_array_type!(AeadIv, AES_GCM_IV_SIZE);
 new_byte_array_type!(AeadMac, AES_GCM_MAC_SIZE);
+
+impl From<sgx_key_128bit_t> for AeadKey {
+    fn from(src: sgx_key_128bit_t) -> Self {
+        Self(src)
+    }
+}
 
 /// An `AEAD` cipher.
 pub struct Aead;
