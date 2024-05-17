@@ -99,10 +99,12 @@ impl DataBuf {
 
     /// Empty the buffer.
     pub fn clear(&self) {
+        let mut is_full = self.is_full.lock().unwrap();
         self.buf.lock().clear();
-
-        *self.is_full.lock().unwrap() = false;
-        self.cvar.notify_all();
+        if *is_full {
+            *is_full = false;
+            self.cvar.notify_all();
+        }
     }
 
     /// Return all the buffered data blocks.

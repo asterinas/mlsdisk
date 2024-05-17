@@ -16,7 +16,7 @@ use crate::layers::lsm::{
     AsKV, LsmLevel, RangeQueryCtx, RecordKey as RecordK, RecordValue as RecordV, SyncIdStore,
     TxEventListener, TxEventListenerFactory, TxLsmTree, TxType,
 };
-use crate::os::{Aead, AeadIv as Iv, AeadKey as Key, AeadMac as Mac, Mutex};
+use crate::os::{Aead, AeadIv as Iv, AeadKey as Key, AeadMac as Mac, RwLock};
 use crate::prelude::*;
 use crate::tx::Tx;
 
@@ -53,8 +53,8 @@ struct DiskInner<D: BlockSet> {
     root_key: Key,
     /// Whether `SwornDisk` is dropped.
     is_dropped: AtomicBool,
-    /// Scope lock for exclusive sync operation.
-    sync_region: Mutex<()>,
+    /// Scope lock for control write and sync operation.
+    write_sync_region: RwLock<()>,
 }
 
 impl<D: BlockSet + 'static> SwornDisk<D> {
@@ -76,6 +76,7 @@ impl<D: BlockSet + 'static> SwornDisk<D> {
     /// The block contents reside in a single contiguous buffer.
     pub fn write(&self, lba: Lba, buf: BufRef) -> Result<()> {
         self.check_rw_args(lba, buf.nblocks())?;
+        let _rguard = self.inner.write_sync_region.read();
         self.inner.write(lba, buf)
     }
 
@@ -83,11 +84,13 @@ impl<D: BlockSet + 'static> SwornDisk<D> {
     /// The block contents reside in several scattered buffers.
     pub fn writev(&self, lba: Lba, bufs: &[BufRef]) -> Result<()> {
         self.check_rw_args(lba, bufs.iter().fold(0, |acc, buf| acc + buf.nblocks()))?;
+        let _rguard = self.inner.write_sync_region.read();
         self.inner.writev(lba, bufs)
     }
 
     /// Sync all cached data in the device to the storage medium for durability.
     pub fn sync(&self) -> Result<()> {
+        let _wguard = self.inner.write_sync_region.write();
         self.inner.sync()?;
 
         #[cfg(not(feature = "linux"))]
@@ -142,7 +145,7 @@ impl<D: BlockSet + 'static> SwornDisk<D> {
                 data_buf: DataBuf::new(DATA_BUF_CAP),
                 root_key,
                 is_dropped: AtomicBool::new(false),
-                sync_region: Mutex::new(()),
+                write_sync_region: RwLock::new(()),
             }),
         };
 
@@ -195,7 +198,7 @@ impl<D: BlockSet + 'static> SwornDisk<D> {
                 tx_log_store,
                 root_key,
                 is_dropped: AtomicBool::new(false),
-                sync_region: Mutex::new(()),
+                write_sync_region: RwLock::new(()),
             }),
         };
 
@@ -442,8 +445,6 @@ impl<D: BlockSet + 'static> DiskInner<D> {
 
     /// Sync all cached data in the device to the storage medium for durability.
     pub fn sync(&self) -> Result<()> {
-        let _guard = self.sync_region.lock();
-
         self.flush_data_buf()?;
         debug_assert!(self.data_buf.is_empty());
 
@@ -772,7 +773,6 @@ mod impl_block_device {
                 crate::Errno::OutOfDisk => Self::NoDeviceSpace,
                 crate::Errno::PermissionDenied => Self::PermError,
                 _ => {
-                    #[cfg(not(feature = "linux"))]
                     log::error!("[SwornDisk] Error occurred: {value:?}");
                     Self::DeviceError(0)
                 }
