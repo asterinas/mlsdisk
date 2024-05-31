@@ -46,5 +46,5 @@ extern crate sgx_tstd;
 pub use self::error::{Errno, Error};
 pub use self::layers::bio::{BlockId, BlockSet, Buf, BufMut, BufRef, BLOCK_SIZE};
 pub use self::layers::disk::SwornDisk;
-pub use self::os::{Aead, AeadKey, Rng};
+pub use self::os::{Aead, AeadIv, AeadKey, AeadMac, Rng};
 pub use self::util::{Aead as _, RandomInit, Rng as _};
