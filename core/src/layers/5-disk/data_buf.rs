@@ -1,16 +1,10 @@
 //! Data buffering.
 use super::sworndisk::RecordKey;
 use crate::layers::bio::{BufMut, BufRef};
-use crate::os::{BTreeMap, Mutex};
+use crate::os::{BTreeMap, Condvar, CvarMutex, Mutex};
 use crate::prelude::*;
 
 use core::ops::RangeInclusive;
-
-// TODO: Put them into os module
-#[cfg(feature = "occlum")]
-use sgx_tstd::sync::{SgxCondvar as Condvar, SgxMutex as CvarMutex};
-#[cfg(feature = "std")]
-use std::sync::{Condvar, Mutex as CvarMutex};
 
 /// A buffer to cache data blocks before they are written to disk.
 #[derive(Debug)]

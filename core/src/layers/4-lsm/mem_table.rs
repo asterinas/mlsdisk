@@ -1,14 +1,9 @@
 //! MemTable.
 use super::{AsKV, RangeQueryCtx, RecordKey, RecordValue, SyncId};
-use crate::os::{BTreeMap, Mutex, RwLock, RwLockReadGuard};
+use crate::os::{BTreeMap, Condvar, CvarMutex, Mutex, RwLock, RwLockReadGuard};
 use crate::prelude::*;
 
 use core::ops::Range;
-// TODO: Put them into os module
-#[cfg(feature = "occlum")]
-use sgx_tstd::sync::{SgxCondvar as Condvar, SgxMutex as CvarMutex};
-#[cfg(feature = "std")]
-use std::sync::{Condvar, Mutex as CvarMutex};
 
 /// Manager for an mutable `MemTable` and an immutable `MemTable`
 /// in a `TxLsmTree`.
