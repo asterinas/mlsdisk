@@ -2,7 +2,7 @@
 use super::sworndisk::Hba;
 use crate::layers::bio::{BlockSet, Buf, BufRef, BID_SIZE};
 use crate::layers::log::{TxLog, TxLogStore};
-use crate::os::{BTreeMap, Mutex};
+use crate::os::{BTreeMap, Condvar, CvarMutex, Mutex};
 use crate::prelude::*;
 use crate::util::BitMap;
 
@@ -11,12 +11,6 @@ use core::num::NonZeroUsize;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use pod::Pod;
 use serde::{Deserialize, Serialize};
-
-// TODO: Put them into os module
-#[cfg(feature = "occlum")]
-use sgx_tstd::sync::{SgxCondvar as Condvar, SgxMutex as CvarMutex};
-#[cfg(feature = "std")]
-use std::sync::{Condvar, Mutex as CvarMutex};
 
 /// The bucket name of block validity table.
 const BUCKET_BLOCK_VALIDITY_TABLE: &str = "BVT";

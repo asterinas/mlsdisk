@@ -11,12 +11,20 @@
 #![feature(negative_impls)]
 #![feature(new_uninit)]
 #![feature(receiver_trait)]
+#![feature(sized_type_properties)]
 #![feature(slice_concat_trait)]
 #![feature(slice_group_by)]
+#![feature(slice_internals)]
 #![feature(tuple_trait)]
 #![feature(unboxed_closures)]
 #![feature(unsize)]
-#![allow(dead_code, stable_features, unknown_lints, unused_imports)]
+#![allow(
+    dead_code,
+    internal_features,
+    stable_features,
+    unknown_lints,
+    unused_imports
+)]
 
 mod error;
 mod layers;

@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bindings = { path = "../linux/bindings", optional = true }
+btree = { git = "https://github.com/asterinas/btree.git", rev = "8583630", optional = true }
 inherit-methods-macro = {git = "https://github.com/asterinas/inherit-methods-macro", rev = "98f7e3e"}
 pod = { git = "https://github.com/asterinas/pod", rev = "d7dba56" }
 
@@ -30,7 +31,7 @@ sgx_types = { git = "https://github.com/apache/teaclave-sgx-sdk.git", optional =
 [features]
 default = ["std"]
 std = ["spin", "openssl", "log"]
-linux = ["bindings"]
+linux = ["bindings", "btree"]
 occlum = ["sgx_tstd", "sgx_rand", "sgx_tcrypto", "sgx_types", "spin", "log"]
 jinux = []
 
