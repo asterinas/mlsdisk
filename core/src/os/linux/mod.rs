@@ -125,6 +125,18 @@ impl<T: ?Sized> AsMut<T> for Box<T> {
     }
 }
 
+impl<I: Iterator + ?Sized> Iterator for Box<I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<I::Item> {
+        self.inner.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
 impl<T: fmt::Debug + ?Sized> fmt::Debug for Box<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&**self, f)
