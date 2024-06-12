@@ -37,7 +37,7 @@ mod util;
 extern crate alloc;
 
 #[cfg(feature = "linux")]
-pub use self::os::{Arc, Mutex};
+pub use self::os::{Arc, Mutex, Vec};
 
 #[cfg(feature = "occlum")]
 #[macro_use]
