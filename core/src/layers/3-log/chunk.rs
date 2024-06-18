@@ -68,7 +68,8 @@ impl ChunkAlloc {
     }
 
     /// Constructs a `ChunkAlloc` from its parts.
-    pub(super) fn from_parts(state: ChunkAllocState, tx_provider: Arc<TxProvider>) -> Self {
+    pub(super) fn from_parts(mut state: ChunkAllocState, tx_provider: Arc<TxProvider>) -> Self {
+        state.in_journal = false;
         let new_self = Self {
             state: Arc::new(Mutex::new(state)),
             tx_provider,
@@ -147,6 +148,7 @@ impl ChunkAlloc {
                     }
                 }
             }
+            ids.sort_unstable();
             ids
         };
 
@@ -215,7 +217,7 @@ impl Debug for ChunkAlloc {
         let state = self.state.lock();
         f.debug_struct("ChunkAlloc")
             .field("bitmap_free_count", &state.free_count)
-            .field("bitmap_min_free", &state.min_free)
+            .field("bitmap_next_free", &state.next_free)
             .finish()
     }
 }
@@ -232,9 +234,11 @@ pub struct ChunkAllocState {
     alloc_map: BitMap,
     // The number of free chunks.
     free_count: usize,
-    // The minimum free chunk Id. Useful to narrow the scope of searching for
-    // free chunk IDs.
-    min_free: usize,
+    // The next free chunk Id. Used to narrow the scope of
+    // searching for free chunk IDs.
+    next_free: usize,
+    /// Whether the state is in the journal or not.
+    in_journal: bool,
 }
 // TODO: Separate persistent and volatile state of `ChunkAlloc`
 
@@ -245,26 +249,43 @@ impl ChunkAllocState {
         Self {
             alloc_map: BitMap::repeat(false, capacity),
             free_count: capacity,
-            min_free: 0,
+            next_free: 0,
+            in_journal: false,
+        }
+    }
+
+    /// Creates a persistent state in the journal. The state in the journal and
+    /// the state that `RawLogStore` manages act differently on allocation and
+    /// edits' appliance.
+    pub fn new_in_journal(capacity: usize) -> Self {
+        Self {
+            alloc_map: BitMap::repeat(false, capacity),
+            free_count: capacity,
+            next_free: 0,
+            in_journal: true,
         }
     }
 
     /// Allocates a chunk, returning its ID.
     pub fn alloc(&mut self) -> Option<ChunkId> {
-        let min_free = self.min_free;
-        if min_free >= self.alloc_map.len() {
-            return None;
+        let mut next_free = self.next_free;
+        if next_free == self.alloc_map.len() {
+            next_free = 0;
         }
 
-        let free_chunk_id = self
-            .alloc_map
-            .first_zero(min_free)
-            .expect("there must exists a zero");
+        let free_chunk_id = {
+            if let Some(chunk_id) = self.alloc_map.first_zero(next_free) {
+                chunk_id
+            } else {
+                self.alloc_map
+                    .first_zero(0)
+                    .expect("there must exists a zero")
+            }
+        };
+
         self.alloc_map.set(free_chunk_id, true);
         self.free_count -= 1;
-
-        // Keep the invariance that all free chunk IDs are no less than `min_free`
-        self.min_free = free_chunk_id + 1;
+        self.next_free = free_chunk_id + 1;
 
         Some(free_chunk_id)
     }
@@ -275,14 +296,9 @@ impl ChunkAllocState {
     ///
     /// Deallocating a free chunk causes panic.
     pub fn dealloc(&mut self, chunk_id: ChunkId) {
-        // debug_assert_eq!(self.alloc_map[chunk_id], true); // may fail in journal's commit
+        debug_assert_eq!(self.alloc_map[chunk_id], true);
         self.alloc_map.set(chunk_id, false);
         self.free_count += 1;
-
-        // Keep the invariance that all free chunk IDs are no less than min_free
-        if chunk_id < self.min_free {
-            self.min_free = chunk_id;
-        }
     }
 
     /// Returns the total number of chunks.
@@ -306,7 +322,7 @@ impl ChunkAllocState {
 ////////////////////////////////////////////////////////////////////////////////
 
 /// A persistent edit to the state of a chunk allocator.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkAllocEdit {
     edit_table: HashMap<ChunkId, ChunkEdit>,
 }
@@ -314,7 +330,7 @@ pub struct ChunkAllocEdit {
 /// The smallest unit of a persistent edit to the
 /// state of a chunk allocator, which is
 /// a chunk being either allocated or deallocated.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 enum ChunkEdit {
     Alloc,
     Dealloc,
@@ -379,22 +395,22 @@ impl ChunkAllocEdit {
 
 impl Edit<ChunkAllocState> for ChunkAllocEdit {
     fn apply_to(&self, state: &mut ChunkAllocState) {
+        let mut to_be_deallocated = Vec::new();
         for (&chunk_id, chunk_edit) in &self.edit_table {
             match chunk_edit {
                 ChunkEdit::Alloc => {
-                    // Journal's state also needs to be updated
-                    if !state.is_chunk_allocated(chunk_id) {
+                    if state.in_journal {
                         let _allocated_id = state.alloc().unwrap();
-                        // `_allocated_id` may not be equal to `chunk_id` due to concurrent TXs,
-                        // but eventually the state will be consistent
                     }
-
                     // Except journal, nothing needs to be done
                 }
                 ChunkEdit::Dealloc => {
-                    state.dealloc(chunk_id);
+                    to_be_deallocated.push(chunk_id);
                 }
             }
+        }
+        for chunk_id in to_be_deallocated {
+            state.dealloc(chunk_id);
         }
     }
 }

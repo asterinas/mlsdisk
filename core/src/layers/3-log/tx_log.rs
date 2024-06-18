@@ -117,22 +117,19 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
         let total_nblocks = disk.nblocks();
         let (log_store_nblocks, journal_nblocks) =
             Self::calc_store_and_journal_nblocks(total_nblocks);
+        let nchunks = log_store_nblocks / CHUNK_NBLOCKS;
+
         let log_store_area = disk.subset(1..1 + log_store_nblocks)?;
         let journal_area =
             disk.subset(1 + log_store_nblocks..1 + log_store_nblocks + journal_nblocks)?;
 
         let tx_provider = TxProvider::new();
 
-        let nchunks = log_store_nblocks / CHUNK_NBLOCKS;
-        let chunk_alloc = ChunkAlloc::new(nchunks, tx_provider.clone());
-        let raw_log_store = RawLogStore::new(log_store_area, tx_provider.clone(), chunk_alloc);
-        let tx_log_store_state = TxLogStoreState::new();
-
         let journal = {
             let all_state = AllState {
-                chunk_alloc: ChunkAllocState::new(nchunks),
+                chunk_alloc: ChunkAllocState::new_in_journal(nchunks),
                 raw_log_store: RawLogStoreState::new(),
-                tx_log_store: tx_log_store_state.clone(),
+                tx_log_store: TxLogStoreState::new(),
             };
             Arc::new(Mutex::new(Journal::format(
                 journal_area,
@@ -141,6 +138,11 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
                 JournalCompactPolicy {},
             )?))
         };
+        Self::register_commit_handler_for_journal(&journal, &tx_provider);
+
+        let chunk_alloc = ChunkAlloc::new(nchunks, tx_provider.clone());
+        let raw_log_store = RawLogStore::new(log_store_area, tx_provider.clone(), chunk_alloc);
+        let tx_log_store_state = TxLogStoreState::new();
 
         let superblock = Superblock {
             journal_area_meta: journal.lock().meta(),
@@ -171,6 +173,37 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
         (log_store_nblocks, journal_nblocks) // TBD
     }
 
+    fn register_commit_handler_for_journal(
+        journal: &Arc<Mutex<Journal<D>>>,
+        tx_provider: &Arc<TxProvider>,
+    ) {
+        let journal = journal.clone();
+        tx_provider.register_commit_handler({
+            move |current: CurrentTx<'_>| {
+                let mut journal = journal.lock();
+                current.data_with(|tx_log_edit: &TxLogStoreEdit| {
+                    if tx_log_edit.is_empty() {
+                        return;
+                    }
+                    journal.add(AllEdit::from_tx_log_edit(tx_log_edit));
+                });
+                current.data_with(|raw_log_edit: &RawLogStoreEdit| {
+                    if raw_log_edit.is_empty() {
+                        return;
+                    }
+                    journal.add(AllEdit::from_raw_log_edit(raw_log_edit));
+                });
+                current.data_with(|chunk_edit: &ChunkAllocEdit| {
+                    if chunk_edit.is_empty() {
+                        return;
+                    }
+                    journal.add(AllEdit::from_chunk_edit(chunk_edit));
+                });
+                journal.commit();
+            }
+        });
+    }
+
     /// Recovers an existing `TxLogStore` from a disk using the given key.
     pub fn recover(disk: D, root_key: Key) -> Result<Self> {
         let superblock = Superblock::open(&disk.subset(0..1)?, &root_key)?;
@@ -186,23 +219,28 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
                 1 + superblock.chunk_area_nblocks
                     ..1 + superblock.chunk_area_nblocks + journal_area_meta.total_nblocks(),
             )?;
-            Journal::recover(journal_area, &journal_area_meta, JournalCompactPolicy {})?
+            Arc::new(Mutex::new(Journal::recover(
+                journal_area,
+                &journal_area_meta,
+                JournalCompactPolicy {},
+            )?))
         };
-        let all_state = journal.state();
+        Self::register_commit_handler_for_journal(&journal, &tx_provider);
 
-        let chunk_alloc =
-            ChunkAlloc::from_parts(all_state.chunk_alloc.clone(), tx_provider.clone());
-        let chunk_area = disk.subset(1..1 + superblock.chunk_area_nblocks)?;
-        let raw_log_store = RawLogStore::from_parts(
-            all_state.raw_log_store.clone(),
-            chunk_area,
+        let AllState {
             chunk_alloc,
-            tx_provider.clone(),
-        );
-        let tx_log_store = TxLogStore::from_parts(
-            all_state.tx_log_store.clone(),
             raw_log_store,
-            Arc::new(Mutex::new(journal)),
+            tx_log_store,
+        } = journal.lock().state().clone();
+
+        let chunk_alloc = ChunkAlloc::from_parts(chunk_alloc, tx_provider.clone());
+        let chunk_area = disk.subset(1..1 + superblock.chunk_area_nblocks)?;
+        let raw_log_store =
+            RawLogStore::from_parts(raw_log_store, chunk_area, chunk_alloc, tx_provider.clone());
+        let tx_log_store = TxLogStore::from_parts(
+            tx_log_store,
+            raw_log_store,
+            journal,
             superblock,
             root_key,
             disk,
@@ -255,33 +293,6 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
                 // Do I/O in the pre-commit phase. If any I/O error occurred,
                 // the TX would be aborted.
                 Self::update_dirty_log_metas(&mut current)
-            }
-        });
-
-        // Commit handler for journal
-        let journal = journal.clone();
-        tx_provider.register_commit_handler({
-            move |current: CurrentTx<'_>| {
-                let mut journal = journal.lock();
-                current.data_with(|chunk_edit: &ChunkAllocEdit| {
-                    if chunk_edit.is_empty() {
-                        return;
-                    }
-                    journal.add(AllEdit::from_chunk_edit(chunk_edit));
-                });
-                current.data_with(|raw_log_edit: &RawLogStoreEdit| {
-                    if raw_log_edit.is_empty() {
-                        return;
-                    }
-                    journal.add(AllEdit::from_raw_log_edit(raw_log_edit));
-                });
-                current.data_with(|tx_log_edit: &TxLogStoreEdit| {
-                    if tx_log_edit.is_empty() {
-                        return;
-                    }
-                    journal.add(AllEdit::from_tx_log_edit(tx_log_edit));
-                });
-                journal.commit();
             }
         });
 
@@ -679,10 +690,9 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
     /// Syncs all the data managed by `TxLogStore` for persistence.
     pub fn sync(&self) -> Result<()> {
         self.raw_log_store.sync().unwrap();
-        self.journal.lock().flush()?;
+        self.journal.lock().flush().unwrap();
 
-        self.raw_disk.flush()?;
-        Ok(())
+        self.raw_disk.flush()
     }
 }
 
@@ -1290,14 +1300,14 @@ mod journaling {
     pub type Journal<D> = EditJournal<AllEdit, AllState, D, JournalCompactPolicy>;
     pub type JournalCompactPolicy = NeverCompactPolicy;
 
-    #[derive(Clone, Serialize, Deserialize)]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct AllState {
         pub chunk_alloc: ChunkAllocState,
         pub raw_log_store: RawLogStoreState,
         pub tx_log_store: TxLogStoreState,
     }
 
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct AllEdit {
         pub chunk_edit: ChunkAllocEdit,
         pub raw_log_edit: RawLogStoreEdit,
@@ -1306,9 +1316,15 @@ mod journaling {
 
     impl Edit<AllState> for AllEdit {
         fn apply_to(&self, state: &mut AllState) {
-            self.chunk_edit.apply_to(&mut state.chunk_alloc);
-            self.raw_log_edit.apply_to(&mut state.raw_log_store);
-            self.tx_log_edit.apply_to(&mut state.tx_log_store);
+            if !self.tx_log_edit.is_empty() {
+                self.tx_log_edit.apply_to(&mut state.tx_log_store);
+            }
+            if !self.raw_log_edit.is_empty() {
+                self.raw_log_edit.apply_to(&mut state.raw_log_store);
+            }
+            if !self.chunk_edit.is_empty() {
+                self.chunk_edit.apply_to(&mut state.chunk_alloc);
+            }
         }
     }
 

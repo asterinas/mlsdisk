@@ -235,7 +235,7 @@ impl<D: BlockSet> RawLogStore<D> {
     /// This method must be called within a TX. Otherwise, this method panics.
     pub fn create_log(&self) -> Result<RawLog<D>> {
         let mut state = self.state.lock();
-        let new_log_id = state.persistent.alloc_log_id();
+        let new_log_id = state.alloc_log_id();
         state
             .add_to_write_set(new_log_id)
             .expect("created log can't appear in write set");
@@ -335,10 +335,7 @@ impl<D> Debug for RawLogStore<D> {
         let state = self.state.lock();
         f.debug_struct("RawLogStore")
             .field("persistent_log_table", &state.persistent.log_table)
-            .field(
-                "persistent_next_free_log_id",
-                &state.persistent.next_free_log_id,
-            )
+            .field("next_free_log_id", &state.next_free_log_id)
             .field("write_set", &state.write_set)
             .field("chunk_alloc", &self.chunk_alloc)
             .finish()
@@ -612,11 +609,12 @@ impl<'a> RawLogHeadRef<'a> {
         debug_assert!(offset + nblocks <= self.entry.head.num_blocks as _);
 
         let prepared_blocks = self.prepare_blocks(offset, nblocks);
-        debug_assert!(prepared_blocks.len() == nblocks && prepared_blocks.is_sorted());
+        debug_assert_eq!(prepared_blocks.len(), nblocks);
 
         // Batch read
+        // Note that `prepared_blocks` are not always sorted
         let mut offset = 0;
-        for consecutive_blocks in prepared_blocks.group_by(|b1, b2| b2 - b1 == 1) {
+        for consecutive_blocks in prepared_blocks.group_by(|b1, b2| b2.saturating_sub(*b1) == 1) {
             let len = consecutive_blocks.len();
             let first_bid = *consecutive_blocks.first().unwrap();
             let buf_slice =
@@ -687,11 +685,12 @@ impl<'a> RawLogTailRef<'a> {
         debug_assert!(offset + nblocks <= tail_nblocks);
 
         let prepared_blocks = self.prepare_blocks(offset, nblocks);
-        debug_assert!(prepared_blocks.len() == nblocks && prepared_blocks.is_sorted());
+        debug_assert_eq!(prepared_blocks.len(), nblocks);
 
         // Batch read
+        // Note that `prepared_blocks` are not always sorted
         let mut offset = 0;
-        for consecutive_blocks in prepared_blocks.group_by(|b1, b2| b2 - b1 == 1) {
+        for consecutive_blocks in prepared_blocks.group_by(|b1, b2| b2.saturating_sub(*b1) == 1) {
             let len = consecutive_blocks.len();
             let first_bid = *consecutive_blocks.first().unwrap();
             let buf_slice =
@@ -707,11 +706,12 @@ impl<'a> RawLogTailRef<'a> {
         let nblocks = buf.nblocks();
 
         let prepared_blocks = self.prepare_blocks(self.len() as _, nblocks);
-        debug_assert!(prepared_blocks.len() == nblocks && prepared_blocks.is_sorted());
+        debug_assert_eq!(prepared_blocks.len(), nblocks);
 
         // Batch write
+        // Note that `prepared_blocks` are not always sorted
         let mut offset = 0;
-        for consecutive_blocks in prepared_blocks.group_by(|b1, b2| b2 - b1 == 1) {
+        for consecutive_blocks in prepared_blocks.group_by(|b1, b2| b2.saturating_sub(*b1) == 1) {
             let len = consecutive_blocks.len();
             let first_bid = *consecutive_blocks.first().unwrap();
             let buf_slice = &buf.as_slice()[offset * BLOCK_SIZE..(offset + len) * BLOCK_SIZE];
@@ -781,6 +781,7 @@ impl<'a> RawLogTailRef<'a> {
 /// The volatile and persistent state of a `RawLogStore`.
 struct State {
     persistent: RawLogStoreState,
+    next_free_log_id: u64,
     write_set: HashSet<RawLogId>,
     lazy_deletes: HashMap<RawLogId, Arc<LazyDelete<RawLogEntry>>>,
 }
@@ -789,7 +790,6 @@ struct State {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RawLogStoreState {
     log_table: HashMap<RawLogId, RawLogEntry>,
-    next_free_log_id: u64,
 }
 
 /// A log entry implies the persistent state of the raw log.
@@ -810,8 +810,14 @@ impl State {
         persistent: RawLogStoreState,
         lazy_deletes: HashMap<RawLogId, Arc<LazyDelete<RawLogEntry>>>,
     ) -> Self {
+        let next_free_log_id = if let Some(max_log_id) = lazy_deletes.keys().max() {
+            max_log_id + 1
+        } else {
+            0
+        };
         Self {
             persistent: persistent.clone(),
+            next_free_log_id,
             write_set: HashSet::new(),
             lazy_deletes,
         }
@@ -819,6 +825,15 @@ impl State {
 
     pub fn apply(&mut self, edit: &RawLogStoreEdit) {
         edit.apply_to(&mut self.persistent);
+    }
+
+    pub fn alloc_log_id(&mut self) -> u64 {
+        let new_log_id = self.next_free_log_id;
+        self.next_free_log_id = self
+            .next_free_log_id
+            .checked_add(1)
+            .expect("64-bit IDs won't be exhausted even though IDs are not recycled");
+        new_log_id
     }
 
     pub fn add_to_write_set(&mut self, log_id: RawLogId) -> Result<()> {
@@ -840,17 +855,7 @@ impl RawLogStoreState {
     pub fn new() -> Self {
         Self {
             log_table: HashMap::new(),
-            next_free_log_id: 0,
         }
-    }
-
-    pub fn alloc_log_id(&mut self) -> u64 {
-        let new_log_id = self.next_free_log_id;
-        self.next_free_log_id = self
-            .next_free_log_id
-            .checked_add(1)
-            .expect("64-bit IDs won't be exhausted even though IDs are not recycled");
-        new_log_id
     }
 
     pub fn create_log(&mut self, new_log_id: u64) {
@@ -1039,11 +1044,6 @@ impl Edit<RawLogStoreState> for RawLogStoreEdit {
                     let RawLogCreate { tail } = create;
                     state.create_log(log_id);
                     state.append_log(log_id, tail);
-
-                    // Journal's state also needs to be updated
-                    if state.next_free_log_id <= log_id {
-                        let _ = state.alloc_log_id();
-                    }
                 }
                 RawLogEdit::Append(append) => {
                     let RawLogAppend { tail } = append;
