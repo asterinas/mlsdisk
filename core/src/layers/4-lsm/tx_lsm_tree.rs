@@ -407,8 +407,6 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> TreeInner<K, V, D> 
 
         self.memtable_manager.sync(master_sync_id);
 
-        self.tx_log_store.sync().unwrap();
-
         // TODO: Error handling: try twice or ignore
         self.master_sync_id.increment()?;
         Ok(())
@@ -767,6 +765,12 @@ impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> Debug for TreeInner
     }
 }
 
+impl<K: RecordKey<K>, V: RecordValue, D: BlockSet + 'static> Debug for TxLsmTree<K, V, D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
 impl LsmLevel {
     const LEVEL0_RATIO: u16 = 4;
     const LEVELI_RATIO: u16 = 10;
@@ -963,7 +967,7 @@ mod tests {
 
     #[test]
     fn tx_lsm_tree_fns() -> Result<()> {
-        let nblocks = 64 * 1024;
+        let nblocks = 102400;
         let mem_disk = MemDisk::create(nblocks)?;
         let tx_log_store = Arc::new(TxLogStore::format(mem_disk, Key::random())?);
         let tx_lsm_tree: TxLsmTree<BlockId, Value, MemDisk> =

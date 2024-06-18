@@ -91,10 +91,11 @@ impl<D: BlockSet + 'static> SwornDisk<D> {
     /// Sync all cached data in the device to the storage medium for durability.
     pub fn sync(&self) -> Result<()> {
         let _wguard = self.inner.write_sync_region.write();
-        self.inner.sync()?;
+        // TODO: Error handling the sync operation
+        self.inner.sync().unwrap();
 
         #[cfg(not(feature = "linux"))]
-        debug!("[SwornDisk] Sync completed");
+        trace!("[SwornDisk] Sync completed. {self:?}");
         Ok(())
     }
 
@@ -150,7 +151,7 @@ impl<D: BlockSet + 'static> SwornDisk<D> {
         };
 
         #[cfg(not(feature = "linux"))]
-        debug!("[SwornDisk] Created successfully!");
+        info!("[SwornDisk] Created successfully! {:?}", &new_self);
         // XXX: Would `disk::drop()` bring unexpected behavior?
         Ok(new_self)
     }
@@ -203,7 +204,7 @@ impl<D: BlockSet + 'static> SwornDisk<D> {
         };
 
         #[cfg(not(feature = "linux"))]
-        debug!("[SwornDisk] Opened successfully!");
+        info!("[SwornDisk] Opened successfully! {:?}", &opened_self);
         Ok(opened_self)
     }
 
@@ -450,13 +451,13 @@ impl<D: BlockSet + 'static> DiskInner<D> {
 
         self.logical_block_table.sync()?;
 
-        self.user_data_disk.flush()?;
-
         // XXX: May impact performance when there comes frequent syncs
         self.block_validity_table
             .do_compaction(&self.tx_log_store)?;
 
-        Ok(())
+        self.tx_log_store.sync()?;
+
+        self.user_data_disk.flush()
     }
 
     /// Handle one block I/O request. Mark the request completed when finished,
@@ -521,6 +522,15 @@ impl<D: BlockSet + 'static> DiskInner<D> {
 impl<D: BlockSet> Drop for SwornDisk<D> {
     fn drop(&mut self) {
         self.inner.is_dropped.store(true, Ordering::Release);
+    }
+}
+
+impl<D: BlockSet + 'static> Debug for SwornDisk<D> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SwornDisk")
+            .field("user_data_nblocks", &self.inner.user_data_disk.nblocks())
+            .field("logical_block_table", &self.inner.logical_block_table)
+            .finish()
     }
 }
 

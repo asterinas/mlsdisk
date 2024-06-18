@@ -8,7 +8,7 @@ use crate::util::BitMap;
 
 use core::mem::size_of;
 use core::num::NonZeroUsize;
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use pod::Pod;
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,7 @@ pub(super) struct AllocTable {
     bitmap: Mutex<BitMap>,
     next_avail: AtomicUsize,
     nblocks: NonZeroUsize,
+    is_dirty: AtomicBool,
     cvar: Condvar,
     num_free: CvarMutex<usize>,
 }
@@ -60,6 +61,7 @@ impl AllocTable {
             bitmap: Mutex::new(BitMap::repeat(true, nblocks.get())),
             next_avail: AtomicUsize::new(0),
             nblocks,
+            is_dirty: AtomicBool::new(false),
             cvar: Condvar::new(),
             num_free: CvarMutex::new(nblocks.get()),
         }
@@ -97,6 +99,9 @@ impl AllocTable {
         debug_assert_eq!(hbas.len(), cnt);
 
         *num_free -= cnt;
+        let _ = self
+            .is_dirty
+            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed);
         Ok(hbas)
     }
 
@@ -160,6 +165,7 @@ impl AllocTable {
                     bitmap: Mutex::new(bitmap),
                     next_avail: AtomicUsize::new(next_avail),
                     nblocks,
+                    is_dirty: AtomicBool::new(false),
                     cvar: Condvar::new(),
                     num_free: CvarMutex::new(num_free),
                 });
@@ -203,6 +209,7 @@ impl AllocTable {
                 bitmap: Mutex::new(bitmap),
                 next_avail: AtomicUsize::new(next_avail),
                 nblocks,
+                is_dirty: AtomicBool::new(false),
                 cvar: Condvar::new(),
                 num_free: CvarMutex::new(num_free),
             })
@@ -218,6 +225,10 @@ impl AllocTable {
 
     /// Persist the block validity table to `BVT` log. GC all existed `BAL` logs.
     pub fn do_compaction<D: BlockSet + 'static>(&self, store: &Arc<TxLogStore<D>>) -> Result<()> {
+        if !self.is_dirty.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
         // Serialize the block validity table
         let bitmap = self.bitmap.lock();
         const BITMAP_MAX_SIZE: usize = 1792 * BLOCK_SIZE; // TBD
@@ -252,7 +263,10 @@ impl AllocTable {
             tx.abort();
             return_errno_with_msg!(TxAborted, "persist block validity table TX aborted");
         }
-        tx.commit()
+        tx.commit()?;
+
+        self.is_dirty.store(false, Ordering::Relaxed);
+        Ok(())
     }
 
     /// Mark a specific slot deallocated.
