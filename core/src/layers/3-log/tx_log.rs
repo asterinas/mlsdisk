@@ -131,11 +131,14 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
                 raw_log_store: RawLogStoreState::new(),
                 tx_log_store: TxLogStoreState::new(),
             };
+            let state_max_nbytes = 1048576; // TBD
+            let compaction_policy =
+                JournalCompactPolicy::new::<D>(journal_area.nblocks(), state_max_nbytes);
             Arc::new(Mutex::new(Journal::format(
                 journal_area,
                 all_state,
-                1048576, // TBD
-                JournalCompactPolicy {},
+                state_max_nbytes,
+                compaction_policy,
             )?))
         };
         Self::register_commit_handler_for_journal(&journal, &tx_provider);
@@ -219,10 +222,11 @@ impl<D: BlockSet + 'static> TxLogStore<D> {
                 1 + superblock.chunk_area_nblocks
                     ..1 + superblock.chunk_area_nblocks + journal_area_meta.total_nblocks(),
             )?;
+            let compaction_policy = JournalCompactPolicy::from_meta(journal_area_meta);
             Arc::new(Mutex::new(Journal::recover(
                 journal_area,
                 &journal_area_meta,
-                JournalCompactPolicy {},
+                compaction_policy,
             )?))
         };
         Self::register_commit_handler_for_journal(&journal, &tx_provider);
@@ -1295,10 +1299,10 @@ impl TxData for OpenLogCache {}
 
 mod journaling {
     use super::*;
-    use crate::layers::edit::EditGroup;
+    use crate::layers::edit::DefaultCompactPolicy;
 
     pub type Journal<D> = EditJournal<AllEdit, AllState, D, JournalCompactPolicy>;
-    pub type JournalCompactPolicy = NeverCompactPolicy;
+    pub type JournalCompactPolicy = DefaultCompactPolicy;
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct AllState {
@@ -1352,18 +1356,6 @@ mod journaling {
                 tx_log_edit: tx_log_edit.clone(),
             }
         }
-    }
-
-    pub struct NeverCompactPolicy;
-
-    impl CompactPolicy<AllEdit, AllState> for JournalCompactPolicy {
-        fn on_commit_edits(&mut self, _edits: &EditGroup<AllEdit, AllState>) {}
-
-        fn should_compact(&self) -> bool {
-            false
-        }
-
-        fn done_compact(&mut self) {}
     }
 }
 
