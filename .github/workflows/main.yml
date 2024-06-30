@@ -24,3 +24,15 @@ jobs:
 
     - name: Run tests
       run: cargo test --verbose
+
+  Run_micro_benches:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Build system
+      run: cargo build --verbose
+
+    - name: Run benches
+      run: cargo bench --verbose
